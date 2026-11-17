@@ -39,19 +39,26 @@ def pechinchou_diagnostic():
         offers=collect()
         queued=0
         enriched=0
-        for offer in offers:
-            short=offer.get("short_url","")
-            if not short.startswith("https://meli.la/"):continue
-            # Upsert only source metadata; never overwrite a reviewed product association.
-            existing=db("fox_pechinchou_queue",params={"select":"short_url","short_url":"eq."+short,"limit":"1"})
-            attributes=extract(offer.get("title",""))
-            if not existing:
-                db("fox_pechinchou_queue","POST",{"short_url":short,"title":offer.get("title","")[:240],"extracted_attributes":attributes,
-                    "status":"awaiting_product_identification"})
+        # Include historical queue entries, not just the current Pechinchou page.
+        existing_rows=db("fox_pechinchou_queue",params={
+            "select":"short_url,title,extracted_attributes","limit":"1000"})
+        existing_by_url={row["short_url"]:row for row in existing_rows}
+        current_by_url={o["short_url"]:o for o in offers if o.get("short_url","").startswith("https://meli.la/")}
+        for short,offer in current_by_url.items():
+            if short not in existing_by_url:
+                db("fox_pechinchou_queue","POST",{
+                    "short_url":short,"title":offer.get("title","")[:240],
+                    "status":"awaiting_product_identification",
+                    "extracted_attributes":extract(offer.get("title",""))})
                 queued+=1
-            else:
-                db("fox_pechinchou_queue","PATCH",{"extracted_attributes":attributes},
-                    params={"short_url":"eq."+short})
+                enriched+=1
+        for row in existing_rows:
+            title=row.get("title") or current_by_url.get(row["short_url"],{}).get("title","")
+            if not title or row.get("extracted_attributes"):
+                continue
+            db("fox_pechinchou_queue","PATCH",{
+                "extracted_attributes":extract(title)
+            },params={"short_url":"eq."+row["short_url"]})
             enriched+=1
         # Compare only with catalog entries already verified and stored internally.
         catalog=db("fox_discovered_products",params={"select":"product_code,title,status","limit":"500"})
