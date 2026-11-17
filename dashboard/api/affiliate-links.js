@@ -73,7 +73,7 @@ module.exports=async function(req,res){
      const offers=Array.isArray(value.offers)?value.offers[0]:value.offers;const rawPrice=value.price??value.salePrice??offers?.price??offers?.lowPrice??null;
      const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
      const rawCode=value.productId??value.itemId??value.mlb??value.sku??null;const code=destination?.match(/MLB-?(\d{7,15})/i)?.[1]||String(rawCode||'').match(/^MLB-?(\d{7,15})$/i)?.[1]||null;
-     const keys=Object.keys(value);const categoryLike=type==='CollectionPage'||type==='ItemList'||type==='BreadcrumbList'||type==='Category'||keys.some(k=>/^(?:children|subcategories|categoryChildren|departments)$/i.test(k))&&!keys.some(k=>/^(?:price|salePrice|originalPrice|sku|productId|itemId)$/i.test(k));const productHints=keys.some(k=>/^(?:product|productId|itemId|sku|originalPrice|discount|salePrice|image|images|thumbnail|merchant|seller|offers|price|category)$/i.test(k));const generic=/^(?:mercado livre|pechinchou|ofertas|promoções|loja)$/i.test((title||'').trim());const isProduct=!generic&&!categoryLike&&(type==='Product'||(title&&title.length>12&&(price!==null||!!code||!!destination||productHints&&keys.some(k=>/^(?:sku|productId|itemId|image|images|thumbnail|seller|merchant)$/i.test(k)))));
+     const keys=Object.keys(value);const categoryLike=type==='CollectionPage'||type==='ItemList'||type==='BreadcrumbList'||type==='Category'||keys.some(k=>/^(?:children|subcategories|categoryChildren|departments)$/i.test(k))&&!keys.some(k=>/^(?:price|salePrice|originalPrice|sku|productId|itemId)$/i.test(k));const productHints=keys.some(k=>/^(?:product|productId|itemId|sku|originalPrice|discount|salePrice|image|images|thumbnail|merchant|seller|offers|price|category)$/i.test(k));const generic=/^(?:mercado livre|pechinchou|ofertas|promoções|loja)$/i.test((title||'').trim());const isProduct=!generic&&!categoryLike&&(type==='Product'||(title&&title.length>12&&(price!==null||!!shortLink||!!code||!!destination)));
      if(isProduct&&title&&title.length>8&&candidates.size<80){
       const key=(code?'MLB'+code:destination||title.toLowerCase()).slice(0,260);
       if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,product_slug:typeof value.slug==='string'&&!/^(?:mercado-livre|mercadolivre\.com\.br)$/i.test(value.slug)?value.slug.slice(0,160):null,affiliate_profile_url:profileUrl,marketplace_short_url:shortLink,source_page_url:classifiedUrls.find(x=>x.type==='pechinchou_page')?.url||null,validation:code&&destination?'product_url_identified':destination?'needs_product_identity':shortLink?'short_link_requires_resolution':profileUrl?'affiliate_profile_is_not_product':'needs_product_destination',affiliate_link_generated:false,verified_offer:false});else {const existing=candidates.get(key);if(!existing.destination&&destination)existing.destination=destination;if(!existing.price&&price)existing.price=price;if(!existing.product_code&&code)existing.product_code='MLB'+code;}
@@ -97,6 +97,45 @@ module.exports=async function(req,res){
     structured.product_code_fields=schemaEvidence.product_code_fields.slice(0,30);
     structured.destination_types=schemaEvidence.destination_types;
     structured.product_samples=structured.candidates.slice(0,8);
+
+    if(String(req.query?.validate_links||'')==='1'){
+     const items=[...candidates.values()].filter(p=>p.marketplace_short_url);
+     const batchRaw=Number(req.query?.batch||0);
+     const batch=Number.isInteger(batchRaw)?Math.min(9,Math.max(0,batchRaw)):0;
+     const selection=items.slice(batch*5,batch*5+5);
+     const safeTarget=(raw)=>{
+      try{
+       const url=new URL(raw);
+       const hosts=['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','lista.mercadolivre.com.br'];
+       return url.protocol==='https:'&&!url.port&&!url.username&&!url.password&&hosts.includes(url.hostname.toLowerCase())&&url.toString().length<2048?url:null;
+      }catch{return null}
+     };
+     const verify=async(p)=>{
+      const result={title:p.title,short_url:p.marketplace_short_url,status:'unresolved',destination_type:null,destination_url:null,product_code:null,affiliate_for_user:false,offer_verified:false};
+      let url=safeTarget(p.marketplace_short_url);
+      if(!url)return {...result,status:'invalid_short_url'};
+      for(let hop=0;hop<4;hop++){
+       if(url.hostname!=='meli.la'){
+        const matched=url.pathname.match(/MLB-?(\d{7,15})/i);
+        const kind=url.pathname.startsWith('/social/')?'affiliate_profile':matched?'product':'other_marketplace_page';
+        return {...result,status:kind==='product'?'product_destination_found':kind==='affiliate_profile'?'affiliate_profile_found':'marketplace_page_found',destination_type:kind,destination_url:url.origin+url.pathname,product_code:matched?'MLB'+matched[1]:null};
+       }
+       try{
+        const response=await fetch(url.toString(),{method:'GET',redirect:'manual',headers:{'User-Agent':'FoxCore-Link-Diagnostic/1.0','Accept':'text/html'},signal:AbortSignal.timeout(3500)});
+        if([401,403,429].includes(response.status))return {...result,status:'provider_blocked',http_status:response.status};
+        if(response.status<300||response.status>=400)return {...result,status:response.ok?'short_link_no_redirect':'provider_http_error',http_status:response.status};
+        const location=response.headers.get('location');
+        if(!location)return {...result,status:'redirect_missing_location'};
+        const next=safeTarget(new URL(location,url).toString());
+        if(!next)return {...result,status:'redirect_to_unapproved_host'};
+        url=next;
+       }catch{return {...result,status:'network_error'}}
+      }
+      return {...result,status:'redirect_hop_limit'};
+     };
+     const checks=await Promise.all(selection.map(verify));
+     structured.link_validation={diagnostic_only:true,checked:checks.length,total_short_links:items.length,batch,batch_size:5,next_batch:(batch+1)*5<items.length?batch+1:null,checks,imported:0,affiliate_link_generated:false};
+    }
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
     return res.json({ok:true,source,http_status:response.status,html_accessible:accessible,html_bytes:html.length,anchor_count:anchors.length,mercado_livre_link_count:mlLinks.length,redirect_link_count:redirectLinks.length,script_count:scripts.length,script_sources:scriptSources,inline_script_count:inlineScriptCount,framework,data_signals:dataSignals,json_ld_blocks:jsonLd,structured_data:structured,distinct_product_codes:codes.length,product_codes:codes.slice(0,15).map(code=>'MLB'+code),product_evidence:productEvidence,collection_enabled:false,items_imported:0,diagnosis:codes.length?'direct_product_codes_found':mlLinks.length?'mercado_livre_links_without_product_codes':redirectLinks.length?'intermediate_links_require_review':scripts.length?'javascript_or_indirect_links_possible':'no_product_signals_in_static_html'});
    }catch(_){return res.json({ok:true,source,html_accessible:false,collection_enabled:false,items_imported:0,reason:'source_access_failed'})}
