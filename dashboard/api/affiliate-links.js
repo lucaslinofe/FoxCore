@@ -5,7 +5,7 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   if(req.method==='GET'){
-   const rows=await db('fox_affiliate_links','GET',null,'?select=id,provider,affiliate_url,verification_status,product_id,product_url,product_title,created_at&order=created_at.desc&limit=50');
+   const rows=await db('fox_affiliate_links','GET',null,'?select=id,provider,affiliate_url,verification_status,product_id,product_url,product_title,link_type,destination_status,tracking_tool_id,created_at&order=created_at.desc&limit=50');
    return res.json({links:rows});
   }
   if(req.method==='PUT'){
@@ -14,6 +14,10 @@ module.exports=async function(req,res){
    const found=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=affiliate_url,product_url');
    if(found.length!==1)return res.status(404).json({ok:false,reason:'not_found'});
    const link=found[0];
+   const metadata=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=link_type,destination_status,tracking_tool_id');
+   if(metadata[0]?.link_type==='affiliate_profile'&&metadata[0]?.destination_status==='user_confirmed'){
+    return res.json({ok:true,destination_matches:false,reason:'affiliate_profile_confirmed',link_type:'affiliate_profile',profile_confirmed:true,commission_verified:false,verification_status:'pending'});
+   }
    const expected=(link.product_url||'').match(/MLB-?(\d{7,15})/i)?.[1];
    if(!expected)return res.status(409).json({ok:false,reason:'product_id_missing'});
    let current=link.affiliate_url,matched=false,reason='redirect_not_confirmed',httpStatus=null;
