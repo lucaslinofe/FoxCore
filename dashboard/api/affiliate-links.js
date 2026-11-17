@@ -6,7 +6,7 @@ module.exports=async function(req,res){
  try{
   const action=String(req.query?.action||req.body?.action||'');
   if(action==='pechinchou_queue'&&req.method==='GET'){
-   const offers=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,status,product_code,product_url,updated_at&order=updated_at.desc&limit=100');
+   const offers=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,status,product_code,product_url,updated_at,candidate_matches,last_match_status,last_match_attempt_at&order=updated_at.desc&limit=100');
    return res.json({ok:true,offers,published:false,automatic_affiliate_generation:false});
   }
   if(action==='pechinchou_automatic_status'&&req.method==='GET'){
