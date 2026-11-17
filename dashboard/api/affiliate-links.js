@@ -25,7 +25,7 @@ module.exports=async function(req,res){
   if(action==='inspect_product_candidate'&&req.method==='POST'){
    const short=String(req.body?.short_url||'');
    const code=String(req.body?.product_code||'');
-   if(!VALID.test(short)||!/^MLB\\d{7,15}$/.test(code))return res.status(400).json({ok:false,reason:'invalid_candidate'});
+   if(!VALID.test(short)||!/^MLB\d{7,15}$/.test(code))return res.status(400).json({ok:false,reason:'invalid_candidate'});
    const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,candidate_matches,source_metadata&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
    const offer=rows[0];
    if(!offer||!(offer.candidate_matches||[]).some(x=>x.product_code===code))return res.status(404).json({ok:false,reason:'candidate_not_registered'});
