@@ -12,6 +12,5 @@ class MultiAttributeTests(unittest.TestCase):
   offer={"title":"TV AOC 40S5166 Roku Full HD"}
   candidates=[{"product_code":"MLB123456789","title":"TV AOC 50S5166 Roku Full HD"}]
   result=compare(offer,candidates)
-  self.assertTrue(result)
-  self.assertIn("model_mismatch",result[0]["conflicts"])
+  self.assertEqual(result,[])  # conflicting models are excluded by conservative initial rank
 if __name__=="__main__":unittest.main()
