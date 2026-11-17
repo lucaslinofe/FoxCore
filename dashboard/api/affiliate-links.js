@@ -30,12 +30,18 @@ module.exports=async function(req,res){
     const accessible=response.ok&&type.includes('text/html');
     const html=accessible?(await response.text()).slice(0,400000):'';
     const codes=[...new Set([...html.matchAll(/MLB-?(\d{7,15})/gi)].map(m=>m[1]))];
+    const productEvidence=codes.slice(0,15).map(code=>{
+     const pattern=new RegExp('MLB-?'+code+'(?![0-9])','gi');
+     const occurrences=[...html.matchAll(pattern)].slice(0,12);
+     const locations=occurrences.map(m=>{const i=m.index||0;const before=html.slice(Math.max(0,i-250),i);const after=html.slice(i+ m[0].length,Math.min(html.length,i+250));const inScript=before.lastIndexOf('<script')>before.lastIndexOf('</script');const inAnchor=before.lastIndexOf('<a ')>before.lastIndexOf('</a>');const inLink=/mercadolivre\\.com\\.br|meli\\.la/i.test(before+after);return {context:inScript?'script':inAnchor?'anchor':'html',near_marketplace_url:inLink}});
+     return {code:'MLB'+code,occurrences:occurrences.length,contexts:[...new Set(locations.map(x=>x.context))],near_marketplace_url:locations.some(x=>x.near_marketplace_url),confirmed_offer:false};
+    });
     const anchors=[...html.matchAll(/<a\b[^>]*?href\s*=\s*["']([^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/g,'&'));
     const mlLinks=anchors.filter(h=>/mercadolivre\.com\.br|mercadolibre\.com|meli\.la/i.test(h));
     const redirectLinks=anchors.filter(h=>/\/(?:go|out|redirect|oferta|produto|promocao|link)\b|[?&](?:url|redirect|target|to)=/i.test(h));
     const scripts=[...html.matchAll(/<script\b[^>]*?src\s*=\s*["']([^"']+)["']/gi)].map(m=>m[1]);
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
-    return res.json({ok:true,source,http_status:response.status,html_accessible:accessible,html_bytes:html.length,anchor_count:anchors.length,mercado_livre_link_count:mlLinks.length,redirect_link_count:redirectLinks.length,script_count:scripts.length,json_ld_blocks:jsonLd,distinct_product_codes:codes.length,product_codes:codes.slice(0,15).map(code=>'MLB'+code),collection_enabled:false,items_imported:0,diagnosis:codes.length?'direct_product_codes_found':mlLinks.length?'mercado_livre_links_without_product_codes':redirectLinks.length?'intermediate_links_require_review':scripts.length?'javascript_or_indirect_links_possible':'no_product_signals_in_static_html'});
+    return res.json({ok:true,source,http_status:response.status,html_accessible:accessible,html_bytes:html.length,anchor_count:anchors.length,mercado_livre_link_count:mlLinks.length,redirect_link_count:redirectLinks.length,script_count:scripts.length,json_ld_blocks:jsonLd,distinct_product_codes:codes.length,product_codes:codes.slice(0,15).map(code=>'MLB'+code),product_evidence:productEvidence,collection_enabled:false,items_imported:0,diagnosis:codes.length?'direct_product_codes_found':mlLinks.length?'mercado_livre_links_without_product_codes':redirectLinks.length?'intermediate_links_require_review':scripts.length?'javascript_or_indirect_links_possible':'no_product_signals_in_static_html'});
    }catch(_){return res.json({ok:true,source,html_accessible:false,collection_enabled:false,items_imported:0,reason:'source_access_failed'})}
   }
   if(req.method==='GET'){
