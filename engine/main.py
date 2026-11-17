@@ -54,7 +54,7 @@ def pechinchou_diagnostic():
                 enriched+=1
         for row in existing_rows:
             title=row.get("title") or current_by_url.get(row["short_url"],{}).get("title","")
-            if not title or row.get("extracted_attributes"):
+            if not title or (row.get("extracted_attributes") or {}).get("source")=="pechinchou_title":
                 continue
             db("fox_pechinchou_queue","PATCH",{
                 "extracted_attributes":extract(title)
