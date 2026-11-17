@@ -26,15 +26,17 @@ module.exports=async function(req,res){
    const links=req.body?.links;
    if(!Array.isArray(links)||links.length<1||links.length>5)return res.status(400).json({ok:false,reason:'invalid_batch'});
    const check=async(raw)=>{
-    const item={short_url:raw,status:'unresolved',destination_url:null,destination_type:null,product_code:null,offer_verified:false,affiliate_for_user:false};
+    const item={short_url:raw,status:'unresolved',destination_url:null,destination_type:null,product_code:null,redirect_evidence:[],offer_verified:false,affiliate_for_user:false};
     if(typeof raw!=='string'||!/^https:\/\/meli\.la\/[A-Za-z0-9_-]{3,80}\/?$/.test(raw))return {...item,status:'invalid_link'};
     let url=new URL(raw);
     const hosts=['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','lista.mercadolivre.com.br'];
     for(let hop=0;hop<4;hop++){
+     const queryKeys=[...url.searchParams.keys()].slice(0,20);const queryCode=[...url.searchParams.values()].map(v=>String(v).match(/MLB-?(\d{7,15})/i)?.[1]).find(Boolean)||null;
+     item.redirect_evidence.push({hop,host:url.hostname,path:url.pathname.slice(0,180),query_keys:queryKeys,product_code_hint:queryCode?'MLB'+queryCode:null});
      if(url.hostname!=='meli.la'){
       const code=url.pathname.match(/MLB-?(\d{7,15})/i)?.[1]||null;
       const kind=url.pathname.startsWith('/social/')?'affiliate_profile':code?'product':'other_marketplace_page';
-      return {...item,status:kind==='product'?'product_destination_found':kind==='affiliate_profile'?'affiliate_profile_found':'marketplace_page_found',destination_url:url.origin+url.pathname,destination_type:kind,product_code:code?'MLB'+code:null};
+      return {...item,status:kind==='product'?'product_destination_found':kind==='affiliate_profile'?'affiliate_profile_found':'marketplace_page_found',destination_url:url.origin+url.pathname,destination_type:kind,product_code:code?'MLB'+code:null,product_code_hint:queryCode?'MLB'+queryCode:null};
      }
      try{
       const response=await fetch(url.toString(),{redirect:'manual',headers:{Accept:'text/html','User-Agent':'FoxCore-Link-Diagnostic/1.1'},signal:AbortSignal.timeout(2500)});
@@ -42,7 +44,7 @@ module.exports=async function(req,res){
       if(response.status<300||response.status>=400)return {...item,status:response.ok?'short_link_no_redirect':'provider_http_error',http_status:response.status};
       const location=response.headers.get('location');if(!location)return {...item,status:'missing_redirect_location'};
       const next=new URL(location,url);
-      if(next.protocol!=='https:'||next.port||next.username||next.password||!hosts.includes(next.hostname.toLowerCase())||next.href.length>2048)return {...item,status:'redirect_to_unapproved_host'};
+      if(next.protocol!=='https:'||next.port||next.username||next.password||!hosts.includes(next.hostname.toLowerCase())||next.href.length>2048)return {...item,status:'redirect_to_unapproved_host',redirect_host:next.hostname.slice(0,100)};
       url=next;
      }catch{return {...item,status:'network_error'}}
     }
