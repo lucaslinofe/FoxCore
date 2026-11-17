@@ -22,7 +22,7 @@ module.exports=async function(req,res){
    }catch(_){row.check_status='network_error'}
    checks.push(row);
   }
-  if(checks.length)await db('fox_product_price_checks','POST',checks,'?on_conflict=product_code');
+  if(checks.length){await db('fox_product_price_checks','POST',checks,'?on_conflict=product_code');await db('fox_product_price_snapshots','POST',checks.map(({product_code,price,currency,available_quantity,listing_status,checked_at,check_status})=>({product_code,price,currency,available_quantity,listing_status,checked_at,check_status})));}
   return res.json({ok:true,checked:checks.length,verified:checks.filter(x=>x.check_status==='verified').length,failed:checks.filter(x=>x.check_status!=='verified').length,publishing:false});
  }catch(_){return res.status(502).json({ok:false,reason:'price_monitor_failed'})}
 };
