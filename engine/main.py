@@ -73,6 +73,11 @@ def pechinchou_diagnostic():
                 lookup=search_candidates(offer)
                 state=lookup["status"]
                 api_statuses[state]=api_statuses.get(state,0)+1
+                db("fox_pechinchou_queue","PATCH",{
+                    "candidate_matches":lookup["candidates"],
+                    "last_match_status":state,
+                    "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
+                },params={"short_url":"eq."+offer["short_url"]})
                 if lookup["candidates"]:
                     api_candidate_offers+=1
                     suggestions.append({"offer_title":offer.get("title","")[:160],
