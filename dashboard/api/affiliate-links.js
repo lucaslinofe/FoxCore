@@ -61,9 +61,9 @@ module.exports=async function(req,res){
      }
      for(const key of keys.slice(0,100))walk(value[key],depth+1);
     };
-    const nextMatch=html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\\s\\S]*?)<\\/script>/i);
+    const nextMatch=html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
     if(nextMatch){structured.next_data_present=true;try{const data=JSON.parse(nextMatch[1]);structured.next_data_parseable=true;structured.next_data_page=typeof data.page==='string'?data.page.slice(0,100):null;walk(data.props)}catch{}}
-    const ldBlocks=[...html.matchAll(/<script[^>]*type=["']application\\/ld\\+json["'][^>]*>([\\s\\S]*?)<\\/script>/gi)].slice(0,12);
+    const ldBlocks=[...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].slice(0,12);
     for(const block of ldBlocks){try{const obj=JSON.parse(block[1]);structured.json_ld_parseable++;const prev=sampleProducts.length;walk(obj);structured.json_ld_product_objects+=sampleProducts.length-prev}catch{}}
     structured.product_samples=sampleProducts;
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
