@@ -1,9 +1,11 @@
-const {ready,db,decrypt,encrypt}=require('./auth/mercadolivre/_shared');
+const {ready,db,decrypt,encrypt,authenticated}=require('./auth/mercadolivre/_shared');
 module.exports=async function(req,res){
  res.setHeader('Cache-Control','no-store');
- if(req.method!=='GET')return res.status(405).end();
+ if(req.method!=='GET'&&req.method!=='POST')return res.status(405).end();
  const expected=process.env.CRON_SECRET;
- if(!expected||req.headers.authorization!=='Bearer '+expected)return res.status(401).json({ok:false});
+ const isCron=req.method==='GET'&&expected&&req.headers.authorization==='Bearer '+expected;
+ const isAdmin=req.method==='POST'&&authenticated(req);
+ if(!isCron&&!isAdmin)return res.status(401).json({ok:false});
  if(!ready())return res.status(503).json({ok:false,reason:'not_configured'});
  try{
   const rows=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at');
