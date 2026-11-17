@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 from threading import Thread
 import requests
+from pechinchou_collect_probe import collect
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -27,15 +28,38 @@ def score(price, reference):
     return round(min(100,100*(reference-price)/reference),2)
 def settings():
     return {x["key"]:x["value"] for x in db("fox_settings")}
+def pechinchou_diagnostic():
+    """Read-only public offer discovery; never follow meli.la or publish."""
+    started=datetime.now(timezone.utc).isoformat()
+    try:
+        offers=collect()
+        summary={"collected":len(offers),"short_links":sum(bool(o.get("short_url")) for o in offers),
+                 "identified_products":0,"imported":0,"published":0,
+                 "reason":"Short-link redirects return 403 in automated environments; no verified MLB match",
+                 "sample_titles":[o.get("title","")[:100] for o in offers[:3]],"diagnostic_only":True}
+        db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"success",
+            "finished_at":datetime.now(timezone.utc).isoformat(),"details":summary})
+        logging.info("Pechinchou diagnostic collected %s offers",len(offers))
+    except Exception as exc:
+        logging.warning("Pechinchou diagnostic failed: %s",type(exc).__name__)
+        db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"failed",
+            "finished_at":datetime.now(timezone.utc).isoformat(),
+            "details":{"reason":type(exc).__name__,"diagnostic_only":True}})
+
 def cycle():
     s=settings()
     sources=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true"})
     # External connectors require independently verified provider credentials.
     db("fox_runs","POST",{"module":"FoxGuard","status":"idle" if not s.get("mining_enabled") else "blocked","finished_at":datetime.now(timezone.utc).isoformat(),"details":{"authorized_sources":len(sources),"dry_run":s.get("dry_run",True),"reason":"Provider connectors not configured"}})
 def loop():
+    last_probe=0
     while True:
         try: cycle()
         except Exception as e: logging.warning("Cycle unavailable: %s",type(e).__name__)
+        if time.monotonic()-last_probe>=8*3600:
+            last_probe=time.monotonic()
+            try: pechinchou_diagnostic()
+            except Exception as e: logging.warning("Pechinchou diagnostic unavailable: %s",type(e).__name__)
         time.sleep(300)
 class Health(BaseHTTPRequestHandler):
     def do_GET(self):
