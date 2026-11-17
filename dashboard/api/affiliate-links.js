@@ -22,6 +22,20 @@ module.exports=async function(req,res){
     return res.json({ok:true,status:'oauth_search_available',products:results.length,results,verified_matches:0,affiliate_links_generated:0});
    }catch{return res.json({ok:true,status:'oauth_search_network_error',products:0})}
   }
+  if(action==='record_manual_product_candidate'&&req.method==='POST'){
+   const short=String(req.body?.short_url||'');
+   const raw=String(req.body?.product_url||'');
+   if(!VALID.test(short))return res.status(400).json({ok:false,reason:'invalid_offer_link'});
+   let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_product_url'})}
+   if(u.protocol!=='https:'||!['www.mercadolivre.com.br','mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname)||u.port||u.username||u.password)return res.status(400).json({ok:false,reason:'invalid_product_url'});
+   const id=u.pathname.match(/MLB-?(\\d{7,15})(?:\\D|$)/i)?.[1];
+   if(!id)return res.status(400).json({ok:false,reason:'product_code_not_in_path'});
+   const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
+   if(!rows.length)return res.status(404).json({ok:false,reason:'offer_not_found'});
+   const candidate={product_code:'MLB'+id,product_url:u.origin+u.pathname,score:null,status:'manual_candidate_unverified',verified:false,evidence:['operator_supplied_product_url']};
+   await db('fox_pechinchou_queue','PATCH',{candidate_matches:[candidate],last_match_status:'manual_candidate_unverified'},'?short_url=eq.'+encodeURIComponent(short));
+   return res.json({ok:true,candidate,offer_verified:false,affiliate_link_generated:false,published:false});
+  }
   if(action==='pechinchou_queue'&&req.method==='GET'){
    const offers=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,status,product_code,product_url,updated_at,candidate_matches,last_match_status,last_match_attempt_at,extracted_attributes,source_metadata&order=updated_at.desc&limit=100');
    return res.json({ok:true,offers,published:false,automatic_affiliate_generation:false});
