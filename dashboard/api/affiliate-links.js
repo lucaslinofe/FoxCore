@@ -47,13 +47,13 @@ module.exports=async function(req,res){
     const structured={next_data_present:false,next_data_parseable:false,next_data_page:null,json_ld_parseable:0,candidates:[],candidate_count:0,eligible_for_import:0,blocked_reason:'source_not_authorized'};
     const candidates=new Map();
     const normalizeUrl=(raw)=>{if(typeof raw!=='string')return null;try{const u=new URL(raw,source);if(u.protocol!=='https:'||u.username||u.password||u.port)return null;if(!['pechinchou.com.br','www.pechinchou.com.br','meli.la','www.mercadolivre.com.br','produto.mercadolivre.com.br','mercadolivre.com.br'].includes(u.hostname))return null;return u.origin+u.pathname.slice(0,240)}catch{return null}};
-    const schemaEvidence={field_paths:[],url_candidates:[],product_code_fields:[]};
-    const inspectObject=(obj,basePath,depth=0,out={urls:[],paths:[],ids:[]})=>{
+    const schemaEvidence={field_paths:[],url_candidates:[],product_code_fields:[],route_fields:[]};
+    const inspectObject=(obj,basePath,depth=0,out={urls:[],paths:[],ids:[],routes:[]})=>{
      if(depth>7||!obj||typeof obj!=='object')return out;
      if(Array.isArray(obj)){obj.slice(0,30).forEach((v,i)=>inspectObject(v,basePath+'['+i+']',depth+1,out));return out}
      for(const [key,val] of Object.entries(obj).slice(0,100)){
       const path=(basePath?basePath+'.':'')+key;
-      if(/(?:url|link|href|permalink|redirect|target|outbound|affiliate|destination)/i.test(key))out.paths.push(path.slice(0,180));
+      if(/(?:url|link|href|permalink|redirect|target|outbound|affiliate|destination|slug|path|uri)/i.test(key)){out.paths.push(path.slice(0,180));if(typeof val==='string'&&/(?:slug|path|uri)/i.test(key))out.routes.push({field:path.slice(0,180),value:val.slice(0,120)});if(typeof val==='string'){const normalized=normalizeUrl(val);if(normalized&&!out.urls.some(x=>x.url===normalized))out.urls.push({field:path.slice(0,180),url:normalized});}}
       if(/(?:sku|product.?id|item.?id|mlb|mpn|gtin)/i.test(key)&&typeof val==='string')out.ids.push({field:path.slice(0,180),value:val.slice(0,60)});
       if(typeof val==='string'&&/^https:\/\//i.test(val)){
        const normalized=normalizeUrl(val);
@@ -67,7 +67,7 @@ module.exports=async function(req,res){
      if(Array.isArray(value)){for(const item of value.slice(0,150))walk(item,origin,depth+1);return}
      const type=String(value['@type']||'');
      const title=typeof value.name==='string'?value.name:typeof value.title==='string'?value.title:null;
-     const urlFields=['url','productUrl','product_url','link','permalink','href','externalUrl','destinationUrl','affiliateUrl'];const fieldEvidence=(title||type==='Product')?inspectObject(value,origin,0):{urls:[],paths:[],ids:[]};schemaEvidence.field_paths.push(...fieldEvidence.paths);schemaEvidence.product_code_fields.push(...fieldEvidence.ids);for(const item of fieldEvidence.urls)if(!schemaEvidence.url_candidates.some(x=>x.url===item.url))schemaEvidence.url_candidates.push(item);const rawUrl=urlFields.map(k=>value[k]).find(v=>typeof v==='string')||value.offers?.url||null;const nestedUrl=fieldEvidence.urls.map(x=>x.url).find(u=>/mercadolivre\.com\.br|meli\.la/i.test(u))||null;
+     const urlFields=['url','productUrl','product_url','link','permalink','href','externalUrl','destinationUrl','affiliateUrl'];const fieldEvidence=(title||type==='Product')?inspectObject(value,origin,0):{urls:[],paths:[],ids:[]};schemaEvidence.field_paths.push(...fieldEvidence.paths);schemaEvidence.product_code_fields.push(...fieldEvidence.ids);schemaEvidence.route_fields.push(...fieldEvidence.routes);for(const item of fieldEvidence.urls)if(!schemaEvidence.url_candidates.some(x=>x.url===item.url))schemaEvidence.url_candidates.push(item);const rawUrl=urlFields.map(k=>value[k]).find(v=>typeof v==='string')||value.offers?.url||null;const nestedUrl=fieldEvidence.urls.map(x=>x.url).find(u=>/mercadolivre\.com\.br|meli\.la/i.test(u))||null;
      const destination=normalizeUrl(rawUrl)||normalizeUrl(nestedUrl);
      const offers=Array.isArray(value.offers)?value.offers[0]:value.offers;const rawPrice=value.price??value.salePrice??offers?.price??offers?.lowPrice??null;
      const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
@@ -92,6 +92,7 @@ module.exports=async function(req,res){
     structured.candidates=[...candidates.values()].slice(0,15);
     structured.schema_field_paths=[...new Set(schemaEvidence.field_paths)].slice(0,60);
     structured.url_candidates=schemaEvidence.url_candidates.slice(0,30);
+    structured.route_fields=schemaEvidence.route_fields.slice(0,30);
     structured.product_code_fields=schemaEvidence.product_code_fields.slice(0,30);
     structured.product_samples=structured.candidates.slice(0,8);
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
