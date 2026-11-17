@@ -6,7 +6,7 @@ from threading import Thread
 import requests
 
 logging.basicConfig(level=logging.INFO)
-BASE=os.getenv("SUPABASE_URL","").rstrip("/")
+BASE="https://bzfhxoxquggkijwreivu.supabase.co"
 KEY=os.getenv("SUPABASE_SERVICE_ROLE_KEY","").strip()
 def db(table, method="GET", data=None, params=None):
     if not BASE or not KEY: raise RuntimeError("Database not configured")
