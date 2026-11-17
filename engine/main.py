@@ -8,6 +8,7 @@ import requests
 from pechinchou_collect_probe import collect
 from product_matcher import rank
 from mercadolivre_search import search_candidates
+from offer_attributes import extract
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -37,15 +38,21 @@ def pechinchou_diagnostic():
     try:
         offers=collect()
         queued=0
+        enriched=0
         for offer in offers:
             short=offer.get("short_url","")
             if not short.startswith("https://meli.la/"):continue
             # Upsert only source metadata; never overwrite a reviewed product association.
             existing=db("fox_pechinchou_queue",params={"select":"short_url","short_url":"eq."+short,"limit":"1"})
+            attributes=extract(offer.get("title",""))
             if not existing:
-                db("fox_pechinchou_queue","POST",{"short_url":short,"title":offer.get("title","")[:240],
+                db("fox_pechinchou_queue","POST",{"short_url":short,"title":offer.get("title","")[:240],"extracted_attributes":attributes,
                     "status":"awaiting_product_identification"})
                 queued+=1
+            else:
+                db("fox_pechinchou_queue","PATCH",{"extracted_attributes":attributes},
+                    params={"short_url":"eq."+short})
+            enriched+=1
         # Compare only with catalog entries already verified and stored internally.
         catalog=db("fox_discovered_products",params={"select":"product_code,title,status","limit":"500"})
         suggestions=[]
@@ -96,7 +103,7 @@ def pechinchou_diagnostic():
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "new_queue_items":queued,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"enriched_offers":enriched,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
