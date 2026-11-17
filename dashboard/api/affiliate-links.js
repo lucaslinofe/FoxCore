@@ -29,18 +29,21 @@ module.exports=async function(req,res){
    const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,candidate_matches,source_metadata&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
    const offer=rows[0];
    if(!offer||!(offer.candidate_matches||[]).some(x=>x.product_code===code))return res.status(404).json({ok:false,reason:'candidate_not_registered'});
+   const registered=offer.candidate_matches.find(x=>x.product_code===code);
+   const catalog=registered.product_code_type==='catalog_product'||(!registered.product_code_type&&/^https:\/\/[^/]+\/p\/MLB\\d{7,15}/i.test(registered.product_url||''));
+   const apiPath=catalog?'products/':'items/';
    const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
    let accessToken=null;
    if(tokens[0]&&Date.parse(tokens[0].expires_at)>Date.now()+60000){
     try{accessToken=decrypt(tokens[0].encrypted_payload).access_token||null}catch{}
    }
    try{
-    const response=await fetch('https://api.mercadolibre.com/items/'+encodeURIComponent(code),{headers:{Accept:'application/json',...(accessToken?{Authorization:'Bearer '+accessToken}:{})},redirect:'manual',signal:AbortSignal.timeout(8000)});
+    const response=await fetch('https://api.mercadolibre.com/'+apiPath+encodeURIComponent(code),{headers:{Accept:'application/json',...(accessToken?{Authorization:'Bearer '+accessToken}:{})},redirect:'manual',signal:AbortSignal.timeout(8000)});
     if(!response.ok)return res.json({ok:true,status:response.status===403?'provider_forbidden':response.status===429?'provider_rate_limited':response.status===401?'provider_unauthorized':'provider_unavailable',http_status:response.status,product_verified:false,offer_identity_verified:false,price_verified:false});
     const item=await response.json();
     if(item.id!==code)return res.json({ok:true,status:'item_id_mismatch',product_verified:false,offer_identity_verified:false,price_verified:false});
-    const price=typeof item.price==='number'&&item.price>0?item.price:null;
-    const regular=typeof item.original_price==='number'&&item.original_price>0?item.original_price:null;
+    const price=!catalog&&typeof item.price==='number'&&item.price>0?item.price:null;
+    const regular=!catalog&&typeof item.original_price==='number'&&item.original_price>0?item.original_price:null;
     const normalized=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().match(/[a-z0-9]+/g)||[];
     const stop=new Set(['para','com','original','mercado','livre','produto','novo','uma','dos','das','por']);
     const sourceTerms=new Set(normalized(offer.title).filter(t=>t.length>2&&!stop.has(t)));
@@ -53,7 +56,7 @@ module.exports=async function(req,res){
     const identityAssessment=modelConflict?'model_conflict':similarity>=75?'strong_title_similarity_unverified':similarity>=40?'partial_title_similarity':'insufficient_title_evidence';
     const sourcePrice=typeof offer.source_metadata?.price==='number'?offer.source_metadata.price:null;
     const priceDifferencePercent=price!==null&&sourcePrice!==null?Math.round(10000*(price-sourcePrice)/sourcePrice)/100:null;
-    return res.json({ok:true,status:'item_api_accessible',product_verified:true,offer_identity_verified:false,product_code:code,title:String(item.title||'').slice(0,200),currency:item.currency_id||null,price,reference_price:regular,price_verified:price!==null,price_source:'mercado_livre_items_api',source_price:sourcePrice,price_difference_percent:priceDifferencePercent,title_similarity_percent:similarity,shared_title_terms:shared.slice(0,8),identity_assessment:identityAssessment,checked_at:new Date().toISOString(),pix_price:null,pix_price_verified:false,coupon_price:null,coupon_price_verified:false,affiliate_link_generated:false,published:false});
+    return res.json({ok:true,status:catalog?'catalog_api_accessible':'item_api_accessible',product_code_type:catalog?'catalog_product':'listing_item',product_verified:true,offer_identity_verified:false,product_code:code,title:String(item.title||'').slice(0,200),currency:item.currency_id||null,price,reference_price:regular,price_verified:price!==null,price_source:'mercado_livre_items_api',source_price:sourcePrice,price_difference_percent:priceDifferencePercent,title_similarity_percent:similarity,shared_title_terms:shared.slice(0,8),identity_assessment:identityAssessment,checked_at:new Date().toISOString(),pix_price:null,pix_price_verified:false,coupon_price:null,coupon_price_verified:false,affiliate_link_generated:false,published:false});
    }catch{return res.json({ok:true,status:'provider_network_error',product_verified:false,offer_identity_verified:false,price_verified:false})}
   }
   if(action==='record_manual_product_candidate'&&req.method==='POST'){
@@ -66,7 +69,8 @@ module.exports=async function(req,res){
    if(!id)return res.status(400).json({ok:false,reason:'product_code_not_in_path'});
    const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
    if(!rows.length)return res.status(404).json({ok:false,reason:'offer_not_found'});
-   const candidate={product_code:'MLB'+id,product_url:u.origin+u.pathname,score:null,status:'manual_candidate_unverified',verified:false,evidence:['operator_supplied_product_url']};
+   const codeType=/^\/p\/MLB\d{7,15}\/?$/i.test(u.pathname)?'catalog_product': 'listing_item';
+   const candidate={product_code:'MLB'+id,product_code_type:codeType,product_url:u.origin+u.pathname,score:null,status:'manual_candidate_unverified',verified:false,evidence:['operator_supplied_product_url']};
    await db('fox_pechinchou_queue','PATCH',{candidate_matches:[candidate],last_match_status:'manual_candidate_unverified'},'?short_url=eq.'+encodeURIComponent(short));
    return res.json({ok:true,candidate,offer_verified:false,affiliate_link_generated:false,published:false});
   }
