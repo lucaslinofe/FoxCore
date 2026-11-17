@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from threading import Thread
 import requests
 from pechinchou_collect_probe import collect
-from product_matcher import rank
+from multi_attribute_matcher import compare
 from mercadolivre_search import search_candidates
 from offer_attributes import extract
 
@@ -120,7 +120,7 @@ def pechinchou_diagnostic():
             else:
                 restricted_at=None
         for offer in offers:
-            matches=rank(offer,catalog)
+            matches=compare(offer,catalog)
             if matches:
                 suggestions.append({"offer_title":offer.get("title","")[:160],"candidates":matches})
         queue_snapshot=db("fox_pechinchou_queue",params={
