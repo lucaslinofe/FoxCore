@@ -5,8 +5,18 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   if(req.method==='GET'){
-   const rows=await db('fox_affiliate_links','GET',null,'?select=id,provider,affiliate_url,verification_status,product_id,product_url,product_title,link_type,destination_status,tracking_tool_id,featured_product_status,featured_product_checked_at,created_at&order=created_at.desc&limit=50');
+   const rows=await db('fox_affiliate_links','GET',null,'?select=id,provider,affiliate_url,verification_status,product_id,product_url,product_title,link_type,destination_status,tracking_tool_id,featured_product_status,featured_product_checked_at,featured_product_confirmation_source,created_at&order=created_at.desc&limit=50');
    return res.json({links:rows});
+  }
+  if(req.method==='POST'&&req.body?.action==='confirm_featured'){
+   const id=String(req.body?.id||'');
+   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_id'});
+   if(req.body?.confirmed!==true)return res.status(400).json({ok:false,reason:'confirmation_required'});
+   const rows=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=product_url,product_title,link_type');
+   if(rows.length!==1)return res.status(404).json({ok:false,reason:'not_found'});
+   if(rows[0].link_type!=='affiliate_profile'||!rows[0].product_title||!rows[0].product_url)return res.status(409).json({ok:false,reason:'associate_product_first'});
+   await db('fox_affiliate_links','PATCH',{featured_product_status:'manual_confirmed',featured_product_confirmed_at:new Date().toISOString(),featured_product_confirmation_source:'admin_browser_confirmation'},'?id=eq.'+id);
+   return res.json({ok:true,featured_product_status:'manual_confirmed',commission_verified:false});
   }
   if(req.method==='OPTIONS')return res.status(405).end();
   if(req.method==='POST'&&req.body?.action==='check_featured'){
@@ -20,17 +30,20 @@ module.exports=async function(req,res){
    if(item.link_type!=='affiliate_profile'||!item.destination_url)return res.status(409).json({ok:false,reason:'profile_not_identified'});
    const url=new URL(item.destination_url);
    if(url.protocol!=='https:'||url.hostname!=='www.mercadolivre.com.br'||!/^\/social\/[a-zA-Z0-9_-]+\/?$/.test(url.pathname)||url.port||url.username||url.password)return res.status(400).json({ok:false,reason:'invalid_profile_destination'});
-   let status='inconclusive',reason='product_not_visible_in_html';
+   let status='inconclusive',reason='product_not_visible_in_html',responseStatus=null;
    try{
     const response=await fetch(url.toString(),{redirect:'manual',signal:AbortSignal.timeout(8000),headers:{'User-Agent':'Mozilla/5.0'}});
+    responseStatus=response.status;
     if([401,403,429].includes(response.status))reason='provider_blocked';
     else if(response.ok){
      const html=(await response.text()).slice(0,1500000);
      if(new RegExp('MLB-?'+expected+'(?!\\d)','i').test(html)){status='html_match';reason='product_id_found_in_html'}
     }else reason='provider_http_error';
    }catch(_){reason='profile_fetch_failed'}
+   const previous=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=featured_product_status');
+   if(previous[0]?.featured_product_status==='manual_confirmed')status='manual_confirmed';
    await db('fox_affiliate_links','PATCH',{featured_product_status:status,featured_product_checked_at:new Date().toISOString()},'?id=eq.'+id);
-   return res.json({ok:true,featured_product_status:status,reason,commission_verified:false});
+   return res.json({ok:true,featured_product_status:status,reason,http_status:responseStatus,commission_verified:false});
   }
   if(req.method==='PUT'){
    const id=String(req.body?.id||'');
