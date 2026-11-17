@@ -48,33 +48,26 @@ module.exports=async function(req,res){
     const candidates=new Map();
     const normalizeUrl=(raw)=>{if(typeof raw!=='string')return null;try{const u=new URL(raw,source);if(u.protocol!=='https:'||u.username||u.password||u.port)return null;if(!['pechinchou.com.br','www.pechinchou.com.br','meli.la','www.mercadolivre.com.br','produto.mercadolivre.com.br','mercadolivre.com.br'].includes(u.hostname))return null;return u.origin+u.pathname.slice(0,240)}catch{return null}};
     const schemaEvidence={field_paths:[],url_candidates:[],product_code_fields:[]};
-    const inspectObject=(obj,basePath,depth=0)=>{
-     if(depth>7||!obj||typeof obj!=='object')return;
-     if(Array.isArray(obj)){obj.slice(0,30).forEach((v,i)=>inspectObject(v,basePath+'['+i+']',depth+1));return}
+    const inspectObject=(obj,basePath,depth=0,out={urls:[],paths:[],ids:[]})=>{
+     if(depth>7||!obj||typeof obj!=='object')return out;
+     if(Array.isArray(obj)){obj.slice(0,30).forEach((v,i)=>inspectObject(v,basePath+'['+i+']',depth+1,out));return out}
      for(const [key,val] of Object.entries(obj).slice(0,100)){
       const path=(basePath?basePath+'.':'')+key;
-      if(/(?:url|link|href|permalink|redirect|target|outbound|affiliate|destination)/i.test(key)){
-       schemaEvidence.field_paths.push(path.slice(0,180));
-       if(typeof val==='string'){
-        const normalized=normalizeUrl(val);
-        if(normalized&&!schemaEvidence.url_candidates.some(x=>x.url===normalized))schemaEvidence.url_candidates.push({field:path.slice(0,180),url:normalized});
-       }
-      }
-      if(/(?:sku|product.?id|item.?id|mlb|mpn|gtin)/i.test(key)&&typeof val==='string'){
-       schemaEvidence.product_code_fields.push({field:path.slice(0,180),value:val.slice(0,60)});
-      }
+      if(/(?:url|link|href|permalink|redirect|target|outbound|affiliate|destination)/i.test(key))out.paths.push(path.slice(0,180));
+      if(/(?:sku|product.?id|item.?id|mlb|mpn|gtin)/i.test(key)&&typeof val==='string')out.ids.push({field:path.slice(0,180),value:val.slice(0,60)});
       if(typeof val==='string'&&/^https:\/\//i.test(val)){
        const normalized=normalizeUrl(val);
-       if(normalized&&!schemaEvidence.url_candidates.some(x=>x.url===normalized))schemaEvidence.url_candidates.push({field:path.slice(0,180),url:normalized});
-      } else if(val&&typeof val==='object')inspectObject(val,path,depth+1);
+       if(normalized&&!out.urls.some(x=>x.url===normalized))out.urls.push({field:path.slice(0,180),url:normalized});
+      }else if(val&&typeof val==='object')inspectObject(val,path,depth+1,out);
      }
+     return out;
     };
     const walk=(value,origin,depth=0)=>{
      if(depth>14||!value||typeof value!=='object')return;
      if(Array.isArray(value)){for(const item of value.slice(0,150))walk(item,origin,depth+1);return}
      const type=String(value['@type']||'');
      const title=typeof value.name==='string'?value.name:typeof value.title==='string'?value.title:null;
-     const urlFields=['url','productUrl','product_url','link','permalink','href','externalUrl','destinationUrl','affiliateUrl'];inspectObject(value,origin,0);const rawUrl=urlFields.map(k=>value[k]).find(v=>typeof v==='string')||value.offers?.url||null;const nestedUrl=schemaEvidence.url_candidates.slice(-20).map(x=>x.url).find(u=>/mercadolivre\.com\.br|meli\.la/i.test(u))||null;
+     const urlFields=['url','productUrl','product_url','link','permalink','href','externalUrl','destinationUrl','affiliateUrl'];const fieldEvidence=(title||type==='Product')?inspectObject(value,origin,0):{urls:[],paths:[],ids:[]};schemaEvidence.field_paths.push(...fieldEvidence.paths);schemaEvidence.product_code_fields.push(...fieldEvidence.ids);for(const item of fieldEvidence.urls)if(!schemaEvidence.url_candidates.some(x=>x.url===item.url))schemaEvidence.url_candidates.push(item);const rawUrl=urlFields.map(k=>value[k]).find(v=>typeof v==='string')||value.offers?.url||null;const nestedUrl=fieldEvidence.urls.map(x=>x.url).find(u=>/mercadolivre\.com\.br|meli\.la/i.test(u))||null;
      const destination=normalizeUrl(rawUrl)||normalizeUrl(nestedUrl);
      const offers=Array.isArray(value.offers)?value.offers[0]:value.offers;const rawPrice=value.price??value.salePrice??offers?.price??offers?.lowPrice??null;
      const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
