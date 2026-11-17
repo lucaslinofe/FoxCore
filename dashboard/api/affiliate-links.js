@@ -28,7 +28,7 @@ module.exports=async function(req,res){
    if(!VALID.test(short))return res.status(400).json({ok:false,reason:'invalid_offer_link'});
    let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_product_url'})}
    if(u.protocol!=='https:'||!['www.mercadolivre.com.br','mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname)||u.port||u.username||u.password)return res.status(400).json({ok:false,reason:'invalid_product_url'});
-   const id=u.pathname.match(/MLB-?(\\d{7,15})(?:\\D|$)/i)?.[1];
+   const id=u.pathname.match(/MLB-?(\d{7,15})(?:\D|$)/i)?.[1];
    if(!id)return res.status(400).json({ok:false,reason:'product_code_not_in_path'});
    const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
    if(!rows.length)return res.status(404).json({ok:false,reason:'offer_not_found'});
