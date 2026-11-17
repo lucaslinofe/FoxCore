@@ -22,4 +22,15 @@ class SourceEvidenceTests(unittest.TestCase):
             {"title":"TV AOC","short_url":"https://meli.la/Abcd123"},
             {"product_url":"https://produto.mercadolivre.com.br/MLB-2907566151-x-_JM"}]}})
         self.assertNotIn("direct_product_candidates",collect()[0])
+    @patch("pechinchou_collect_probe.requests.get")
+    def test_schema_diagnostic_records_names_not_values(self,get):
+        get.return_value=Response({"props":{"offers":[
+            {"title":"Oferta","short_url":"https://meli.la/Abcd123",
+             "mysteryPrice":999.0,"sellerPrivate":"Sensitive Seller"}]}})
+        offers,diagnostic=collect(with_diagnostics=True)
+        self.assertEqual(len(offers),1)
+        fields=diagnostic["offer_field_signatures"]
+        self.assertEqual(fields["mysteryPrice:number"],1)
+        self.assertEqual(fields["sellerPrivate:string"],1)
+        self.assertNotIn("Sensitive Seller",str(diagnostic))
 if __name__=="__main__":unittest.main()
