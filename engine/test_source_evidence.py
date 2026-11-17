@@ -1,7 +1,7 @@
 import json
 import unittest
 from unittest.mock import patch
-from pechinchou_collect_probe import collect
+from pechinchou_collect_probe import collect,parse_brl_price
 
 class Response:
     def __init__(self, payload):
@@ -33,4 +33,19 @@ class SourceEvidenceTests(unittest.TestCase):
         self.assertEqual(fields["mysteryPrice:number"],1)
         self.assertEqual(fields["sellerPrivate:string"],1)
         self.assertNotIn("Sensitive Seller",str(diagnostic))
+    def test_brl_price_formats(self):
+        self.assertEqual(parse_brl_price("R$ 1.299,90"),1299.90)
+        self.assertEqual(parse_brl_price("899,00"),899.0)
+        self.assertIsNone(parse_brl_price("Grátis"))
+    @patch("pechinchou_collect_probe.requests.get")
+    def test_price_image_store_from_source(self,get):
+        get.return_value=Response({"props":{"offers":[
+            {"title":"TV","short_url":"https://meli.la/Abcd123",
+             "price":"R$ 1.299,90","old_price":"R$ 1.599,90",
+             "store":{"name":"Loja Exemplo"},"image":"https://example.org/tv.jpg"}]}})
+        item=collect()[0]
+        self.assertEqual(item["price"],1299.90)
+        self.assertEqual(item["original_price"],1599.90)
+        self.assertEqual(item["seller"],"Loja Exemplo")
+        self.assertEqual(item["image_url"],"https://example.org/tv.jpg")
 if __name__=="__main__":unittest.main()
