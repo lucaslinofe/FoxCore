@@ -4,7 +4,8 @@ Requires: pip install playwright && python -m playwright install chromium
 No imports, affiliate-link generation or publication.
 """
 import json, re, sys
-from urllib.parse import urlsplit
+import requests
+from urllib.parse import urlsplit, urljoin
 from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
 
 SHORT=re.compile(r"^https://meli\.la/[A-Za-z0-9_-]{3,80}/?$")
@@ -24,9 +25,31 @@ def inspect(offers):
                 context=browser.new_context(accept_downloads=False)
                 page=context.new_page()
                 try:
-                    page.goto(short,wait_until="domcontentloaded",timeout=18000)
+                    navigation=page.goto(short,wait_until="domcontentloaded",timeout=18000)
+                    result["browser_http_status"]=navigation.status if navigation else None
                     page.wait_for_timeout(1200)
                     final=urlsplit(page.url)
+                    if final.hostname=="meli.la":
+                        try:
+                            # Only inspect the official short-link response; do not follow unknown hosts.
+                            short_response=requests.get(short,timeout=12,allow_redirects=False,stream=True)
+                            try:
+                                result["short_http_status"]=short_response.status_code
+                                location=short_response.headers.get("Location","")
+                                resolved=urljoin(short,location) if location else ""
+                                target=urlsplit(resolved)
+                                result["redirect_host"]=target.hostname or ""
+                                if (300<=short_response.status_code<400 and
+                                    target.scheme=="https" and target.hostname in HOSTS):
+                                    result["approved_redirect_discovered"]=True
+                                    navigation=page.goto(resolved,wait_until="domcontentloaded",timeout=18000)
+                                    result["resolved_http_status"]=navigation.status if navigation else None
+                                    page.wait_for_timeout(1200)
+                                    final=urlsplit(page.url)
+                            finally:
+                                short_response.close()
+                        except requests.RequestException as exc:
+                            result["short_http_error"]=type(exc).__name__
                     if final.scheme!="https" or final.hostname not in HOSTS:
                         result["status"]="unapproved_destination"
                         result["destination_scheme"]=final.scheme
