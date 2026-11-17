@@ -14,20 +14,25 @@ module.exports=async function(req,res){
    const found=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=affiliate_url,product_url');
    if(found.length!==1)return res.status(404).json({ok:false,reason:'not_found'});
    const link=found[0];
-   const metadata=await db('fox_affiliate_links','GET',null,'?id=eq.'+id+'&select=link_type,destination_status,tracking_tool_id');
-   if(metadata[0]?.link_type==='affiliate_profile'&&metadata[0]?.destination_status==='user_confirmed'){
-    return res.json({ok:true,destination_matches:false,reason:'affiliate_profile_confirmed',link_type:'affiliate_profile',profile_confirmed:true,commission_verified:false,verification_status:'pending'});
-   }
-   const expected=(link.product_url||'').match(/MLB-?(\d{7,15})/i)?.[1];
-   if(!expected)return res.status(409).json({ok:false,reason:'product_id_missing'});
-   let current=link.affiliate_url,matched=false,reason='redirect_not_confirmed',httpStatus=null;
+   let current=link.affiliate_url,reason='redirect_not_confirmed',httpStatus=null,matched=false,linkType='unknown',profilePath=null,trackingToolId=null;
    const allowed=new Set(['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','lista.mercadolivre.com.br']);
+   const expected=(link.product_url||'').match(/MLB-?(\d{7,15})/i)?.[1]||null;
    try{
     for(let i=0;i<7;i++){
      const u=new URL(current);
      if(u.protocol!=='https:'||u.port||u.username||u.password||!allowed.has(u.hostname.toLowerCase())){reason='unsupported_redirect_domain';break}
-     const productMatch=u.pathname.match(/MLB-?(\\d{7,15})/i);
-     if(productMatch){matched=productMatch[1]===expected;reason=matched?'destination_matches_product':'different_product';break}
+     if(u.pathname.startsWith('/social/')){
+      linkType='affiliate_profile';profilePath=u.origin+u.pathname;
+      trackingToolId=u.searchParams.get('matt_tool')||u.searchParams.get('matt_tool_id');
+      reason='affiliate_profile_detected';break;
+     }
+     const productMatch=u.pathname.match(/MLB-?(\d{7,15})/i);
+     if(productMatch){
+      linkType='direct_product';
+      matched=expected?productMatch[1]===expected:false;
+      reason=expected?(matched?'destination_matches_product':'different_product'):'product_id_missing';
+      break;
+     }
      const response=await fetch(u.toString(),{method:'GET',redirect:'manual',signal:AbortSignal.timeout(7000),headers:{'User-Agent':'Mozilla/5.0 (compatible; FoxCoreLinkCheck/1.0)'}});
      httpStatus=response.status;
      if([401,403,429].includes(response.status)){reason='provider_blocked';break}
@@ -35,13 +40,16 @@ module.exports=async function(req,res){
       const location=response.headers.get('location');
       if(!location){reason='redirect_without_location';break}
       current=new URL(location,current).toString();
-      reason='redirect_not_confirmed';continue;
+      continue;
      }
      reason=response.ok?'destination_unconfirmed':'provider_http_error';
      break;
     }
    }catch(_){reason='redirect_check_failed'}
-   return res.json({ok:true,destination_matches:matched,reason,http_status:httpStatus,commission_verified:false,verification_status:'pending'});
+   if(linkType==='affiliate_profile'){
+    await db('fox_affiliate_links','PATCH',{link_type:'affiliate_profile',destination_url:profilePath,tracking_tool_id:trackingToolId,destination_status:'profile_detected'},'?id=eq.'+id);
+   }
+   return res.json({ok:true,destination_matches:matched,reason,http_status:httpStatus,link_type:linkType,profile_detected:linkType==='affiliate_profile',featured_product_verified:false,commission_verified:false,verification_status:'pending'});
   }
   if(req.method==='PATCH'){
    const id=String(req.body?.id||'');
