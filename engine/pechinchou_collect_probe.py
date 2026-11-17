@@ -5,6 +5,18 @@ import requests
 
 SOURCE="https://pechinchou.com.br/lojas/mercadolivre.com.br"
 SHORT=re.compile(r"^https://meli\.la/[A-Za-z0-9_-]{3,80}/?$")
+def parse_brl_price(value):
+    if isinstance(value,(int,float)) and not isinstance(value,bool):
+        return round(float(value),2) if 0<float(value)<10000000 else None
+    if not isinstance(value,str):
+        return None
+    raw=value.strip().replace("R$","").replace(" ","")
+    if not re.fullmatch(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+(?:\.\d{2})?",raw):
+        return None
+    if "," in raw:
+        raw=raw.replace(".","").replace(",",".")
+    amount=float(raw)
+    return round(amount,2) if 0<amount<10000000 else None
 def collect(with_diagnostics=False):
     response=requests.get(SOURCE,timeout=20,headers={"User-Agent":"FoxCore-Readiness/1.0"})
     response.raise_for_status()
@@ -40,7 +52,7 @@ def collect(with_diagnostics=False):
                 metadata={}
                 for field,keys in {
                     "description":("description","subtitle","product_description"),
-                    "seller":("seller_name","seller","store_name","vendor_name"),
+                    "seller":("seller_name","seller","store_name","vendor_name","store"),
                     "image_url":("image_url","image","thumbnail"),
                     "price":("price","sale_price","current_price","offer_price"),
                     "original_price":("original_price","old_price","list_price")
@@ -48,10 +60,12 @@ def collect(with_diagnostics=False):
                     for key in keys:
                         value=node.get(key)
                         if isinstance(value,dict) and field=="seller":
-                            value=next((value.get(k) for k in ("name","nickname") if isinstance(value.get(k),str)),None)
-                        if field in ("price","original_price") and isinstance(value,(int,float)) and not isinstance(value,bool) and 0<value<10000000:
-                            metadata[field]=value
-                            break
+                            value=next((value.get(k) for k in ("name","title","nickname") if isinstance(value.get(k),str)),None)
+                        if field in ("price","original_price"):
+                            amount=parse_brl_price(value)
+                            if amount is not None:
+                                metadata[field]=amount
+                                break
                         if field in ("description","seller") and isinstance(value,str) and value.strip():
                             metadata[field]=value.strip()[:500 if field=="description" else 160]
                             break
