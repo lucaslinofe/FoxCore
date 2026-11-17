@@ -116,11 +116,28 @@ def pechinchou_diagnostic():
             matches=rank(offer,catalog)
             if matches:
                 suggestions.append({"offer_title":offer.get("title","")[:160],"candidates":matches})
+        queue_snapshot=db("fox_pechinchou_queue",params={
+            "select":"short_url,title,product_code,candidate_matches,extracted_attributes",
+            "limit":"1000"})
+        queue_total=len(queue_snapshot)
+        queue_enriched=sum((x.get("extracted_attributes") or {}).get("source")=="pechinchou_title"
+                           for x in queue_snapshot)
+        queue_with_candidates=sum(bool(x.get("candidate_matches")) for x in queue_snapshot)
+        queue_verified=sum(bool(x.get("product_code")) for x in queue_snapshot)
+        diagnostics={
+            "source_direct_url_evidence":direct_evidence,
+            "search_api_restricted":bool(restricted_at),
+            "queue_total":queue_total,
+            "queue_with_attributes":queue_enriched,
+            "queue_with_candidates":queue_with_candidates,
+            "queue_with_verified_product_code":queue_verified,
+            "identification_blocker":"no_accessible_verified_product_source" if queue_verified==0 else None
+        }
         summary={"collected":len(offers),"short_links":sum(bool(o.get("short_url")) for o in offers),
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"identification_diagnostics":diagnostics,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
