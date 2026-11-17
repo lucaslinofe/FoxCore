@@ -39,19 +39,29 @@ def pechinchou_diagnostic():
         offers=collect()
         queued=0
         enriched=0
+        direct_evidence=0
         # Include historical queue entries, not just the current Pechinchou page.
         existing_rows=db("fox_pechinchou_queue",params={
-            "select":"short_url,title,extracted_attributes","limit":"1000"})
+            "select":"short_url,title,extracted_attributes,candidate_matches","limit":"1000"})
         existing_by_url={row["short_url"]:row for row in existing_rows}
         current_by_url={o["short_url"]:o for o in offers if o.get("short_url","").startswith("https://meli.la/")}
         for short,offer in current_by_url.items():
+            direct=offer.get("direct_product_candidates") or []
+            if direct:
+                direct_evidence+=1
             if short not in existing_by_url:
                 db("fox_pechinchou_queue","POST",{
                     "short_url":short,"title":offer.get("title","")[:240],
                     "status":"awaiting_product_identification",
-                    "extracted_attributes":extract(offer.get("title",""))})
+                    "extracted_attributes":extract(offer.get("title","")),
+                    "candidate_matches":[dict(c,status="source_direct_candidate",verified=False) for c in direct]})
                 queued+=1
                 enriched+=1
+            elif direct and not (existing_by_url[short].get("candidate_matches") or []):
+                db("fox_pechinchou_queue","PATCH",{
+                    "candidate_matches":[dict(c,status="source_direct_candidate",verified=False) for c in direct],
+                    "last_match_status":"direct_source_candidate"
+                },params={"short_url":"eq."+short})
         for row in existing_rows:
             title=row.get("title") or current_by_url.get(row["short_url"],{}).get("title","")
             if not title or (row.get("extracted_attributes") or {}).get("source")=="pechinchou_title":
@@ -110,7 +120,7 @@ def pechinchou_diagnostic():
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "new_queue_items":queued,"enriched_offers":enriched,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
