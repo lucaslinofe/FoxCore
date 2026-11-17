@@ -4,6 +4,28 @@ module.exports=async function(req,res){
  res.setHeader('Cache-Control','no-store');
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
+  const action=String(req.query?.action||req.body?.action||'');
+  if(action==='discovered_products'){
+   if(req.method==='GET'){const products=await db('fox_discovered_products','GET',null,'?select=id,provider,product_code,source_url,product_url,title,status,discovered_at&order=discovered_at.desc&limit=100');return res.json({ok:true,products,automatic_collection:false,automatic_affiliate_generation:false})}
+   if(req.method==='POST'){
+    const b=req.body||{};if(b.provider!=='pechinchou')return res.status(400).json({ok:false,reason:'invalid_source'});
+    let src,product;try{src=new URL(String(b.source_url||''));product=new URL(String(b.product_url||''))}catch{return res.status(400).json({ok:false,reason:'invalid_url'})}
+    if(src.protocol!=='https:'||!['pechinchou.com.br','www.pechinchou.com.br'].includes(src.hostname)||src.port||src.username||src.password)return res.status(400).json({ok:false,reason:'invalid_source'});
+    if(product.protocol!=='https:'||!['produto.mercadolivre.com.br','www.mercadolivre.com.br','mercadolivre.com.br'].includes(product.hostname)||product.port||product.username||product.password)return res.status(400).json({ok:false,reason:'invalid_product'});
+    const id=product.pathname.match(/MLB-?(\\d{7,15})/i)?.[1];if(!id)return res.status(400).json({ok:false,reason:'product_id_missing'});
+    const products=await db('fox_discovered_products','POST',{provider:'pechinchou',product_code:'MLB'+id,source_url:src.origin+src.pathname,product_url:product.origin+product.pathname,title:String(b.title||'').slice(0,240)||null,status:'awaiting_own_affiliate_link'},'?on_conflict=provider,product_code');
+    return res.json({ok:true,product:products[0],published:false,affiliate_link_generated:false})
+   }
+   return res.status(405).end();
+  }
+  if(action==='integration_readiness'&&req.method==='GET'){
+   const [sources,links,drafts]=await Promise.all([db('fox_sources','GET',null,'?select=name,provider,enabled,authorized&provider=eq.pechinchou&limit=1'),db('fox_affiliate_links','GET',null,'?select=id&limit=200'),db('fox_offer_drafts','GET',null,'?select=affiliate_link_id&limit=200')]);const source=sources[0]||null;
+   return res.json({ok:true,pechinchou:{registered:!!source,enabled:source?.enabled===true,authorized:source?.authorized===true,automatic_collection_active:false},mercado_livre:{automatic_link_generation_verified:false,registered_links:links.length},offers:{drafts:drafts.length}});
+  }
+  if(action==='pechinchou_probe'&&req.method==='GET'){
+   const source='https://pechinchou.com.br/lojas/mercadolivre.com.br';
+   try{const response=await fetch(source,{headers:{Accept:'text/html','User-Agent':'FoxCore-Source-Readiness/1.0'},redirect:'manual',signal:AbortSignal.timeout(8000)});const type=response.headers.get('content-type')||'';const accessible=response.ok&&type.includes('text/html');const html=accessible?(await response.text()).slice(0,250000):'';const matches=[...html.matchAll(/MLB-?(\\d{7,15})/gi)];return res.json({ok:true,source,http_status:response.status,html_accessible:accessible,distinct_product_codes:new Set(matches.map(m=>m[1])).size,collection_enabled:false,items_imported:0})}catch{return res.json({ok:true,source,html_accessible:false,collection_enabled:false,items_imported:0,reason:'source_access_failed'})}
+  }
   if(req.method==='GET'){
    const rows=await db('fox_affiliate_links','GET',null,'?select=id,provider,affiliate_url,verification_status,product_id,product_url,product_title,link_type,destination_status,tracking_tool_id,featured_product_status,featured_product_checked_at,featured_product_confirmation_source,created_at&order=created_at.desc&limit=50');
    return res.json({links:rows});
