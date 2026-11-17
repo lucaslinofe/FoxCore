@@ -36,7 +36,7 @@ def pechinchou_diagnostic():
     """Read-only public offer discovery; never follow meli.la or publish."""
     started=datetime.now(timezone.utc).isoformat()
     try:
-        offers=collect()
+        offers,source_schema=collect(with_diagnostics=True)
         queued=0
         enriched=0
         direct_evidence=0
@@ -144,7 +144,7 @@ def pechinchou_diagnostic():
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"offers_with_source_metadata":sum(any(k in o for k in ("description","seller","image_url","price","original_price")) for o in offers),"identification_diagnostics":diagnostics,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"offers_with_source_metadata":sum(any(k in o for k in ("description","seller","image_url","price","original_price")) for o in offers),"source_schema":source_schema,"identification_diagnostics":diagnostics,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
