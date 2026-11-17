@@ -26,8 +26,31 @@ def collect():
                     match=re.match(r"^https://(?:produto\.mercadolivre\.com\.br|www\.mercadolivre\.com\.br|mercadolivre\.com\.br)/[^\s?#]*?MLB-?(\d{7,15})(?:[^\s?#]*)?(?:[?#].*)?$",value,re.I)
                     if match:
                         direct.append({"product_code":"MLB"+match.group(1),"product_url":value.split("?")[0].split("#")[0]})
+                # Preserve only metadata present in the same offer object.
+                metadata={}
+                for field,keys in {
+                    "description":("description","subtitle","product_description"),
+                    "seller":("seller_name","seller","store_name","vendor_name"),
+                    "image_url":("image_url","image","thumbnail"),
+                    "price":("price","sale_price","current_price","offer_price"),
+                    "original_price":("original_price","old_price","list_price")
+                }.items():
+                    for key in keys:
+                        value=node.get(key)
+                        if isinstance(value,dict) and field=="seller":
+                            value=next((value.get(k) for k in ("name","nickname") if isinstance(value.get(k),str)),None)
+                        if field in ("price","original_price") and isinstance(value,(int,float)) and not isinstance(value,bool) and 0<value<10000000:
+                            metadata[field]=value
+                            break
+                        if field in ("description","seller") and isinstance(value,str) and value.strip():
+                            metadata[field]=value.strip()[:500 if field=="description" else 160]
+                            break
+                        if field=="image_url" and isinstance(value,str) and re.match(r"^https://[^\\s]+$",value):
+                            metadata[field]=value[:600]
+                            break
                 for link in links:
                     item=offers.setdefault(link,{"short_url":link,"title":title[:240]})
+                    item.update({k:v for k,v in metadata.items() if k not in item})
                     if direct:item["direct_product_candidates"]=direct[:3]
             for value in node.values():walk(value,depth+1)
         elif isinstance(node,list):
