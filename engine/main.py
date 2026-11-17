@@ -42,17 +42,18 @@ def pechinchou_diagnostic():
         direct_evidence=0
         # Include historical queue entries, not just the current Pechinchou page.
         existing_rows=db("fox_pechinchou_queue",params={
-            "select":"short_url,title,extracted_attributes,candidate_matches","limit":"1000"})
+            "select":"short_url,title,extracted_attributes,candidate_matches,source_metadata","limit":"1000"})
         existing_by_url={row["short_url"]:row for row in existing_rows}
         current_by_url={o["short_url"]:o for o in offers if o.get("short_url","").startswith("https://meli.la/")}
         for short,offer in current_by_url.items():
             direct=offer.get("direct_product_candidates") or []
+            metadata={k:offer[k] for k in ("description","seller","image_url","price","original_price") if k in offer}
             if direct:
                 direct_evidence+=1
             if short not in existing_by_url:
                 db("fox_pechinchou_queue","POST",{
                     "short_url":short,"title":offer.get("title","")[:240],
-                    "status":"awaiting_product_identification",
+                    "status":"awaiting_product_identification","source_metadata":metadata,
                     "extracted_attributes":extract(offer.get("title","")),
                     "candidate_matches":[dict(c,status="source_direct_candidate",verified=False) for c in direct]})
                 queued+=1
@@ -62,6 +63,12 @@ def pechinchou_diagnostic():
                     "candidate_matches":[dict(c,status="source_direct_candidate",verified=False) for c in direct],
                     "last_match_status":"direct_source_candidate"
                 },params={"short_url":"eq."+short})
+        for short,offer in current_by_url.items():
+            if short in existing_by_url:
+                metadata={k:offer[k] for k in ("description","seller","image_url","price","original_price") if k in offer}
+                if metadata and metadata!=existing_by_url[short].get("source_metadata"):
+                    db("fox_pechinchou_queue","PATCH",{"source_metadata":metadata},
+                       params={"short_url":"eq."+short})
         for row in existing_rows:
             title=row.get("title") or current_by_url.get(row["short_url"],{}).get("title","")
             if not title or (row.get("extracted_attributes") or {}).get("source")=="pechinchou_title":
@@ -137,7 +144,7 @@ def pechinchou_diagnostic():
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"identification_diagnostics":diagnostics,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"enriched_offers":enriched,"offers_with_direct_source_evidence":direct_evidence,"offers_with_source_metadata":sum(any(k in o for k in ("description","seller","image_url","price","original_price")) for o in offers),"identification_diagnostics":diagnostics,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
