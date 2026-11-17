@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 from threading import Thread
 import requests
 from pechinchou_collect_probe import collect
+from product_matcher import rank
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -33,10 +34,19 @@ def pechinchou_diagnostic():
     started=datetime.now(timezone.utc).isoformat()
     try:
         offers=collect()
+        # Compare only with catalog entries already verified and stored internally.
+        catalog=db("fox_discovered_products",params={"select":"product_code,title,status","limit":"500"})
+        suggestions=[]
+        for offer in offers:
+            matches=rank(offer,catalog)
+            if matches:
+                suggestions.append({"offer_title":offer.get("title","")[:160],"candidates":matches})
         summary={"collected":len(offers),"short_links":sum(bool(o.get("short_url")) for o in offers),
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Short-link redirects return 403 in automated environments; no verified MLB match",
-                 "sample_titles":[o.get("title","")[:100] for o in offers[:3]],"diagnostic_only":True}
+                 "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
+                 "candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "suggestions":suggestions[:20],"diagnostic_only":True}
         db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"success",
             "finished_at":datetime.now(timezone.utc).isoformat(),"details":summary})
         logging.info("Pechinchou diagnostic collected %s offers",len(offers))
