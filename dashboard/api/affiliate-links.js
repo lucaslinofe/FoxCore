@@ -22,6 +22,21 @@ module.exports=async function(req,res){
    const [sources,links,drafts]=await Promise.all([db('fox_sources','GET',null,'?select=name,provider,enabled,authorized&provider=eq.pechinchou&limit=1'),db('fox_affiliate_links','GET',null,'?select=id&limit=200'),db('fox_offer_drafts','GET',null,'?select=affiliate_link_id&limit=200')]);const source=sources[0]||null;
    return res.json({ok:true,pechinchou:{registered:!!source,enabled:source?.enabled===true,authorized:source?.authorized===true,automatic_collection_active:false},mercado_livre:{automatic_link_generation_verified:false,registered_links:links.length},offers:{drafts:drafts.length}});
   }
+  if(action==='inspect_affiliate_profile'&&req.method==='POST'){
+   const raw=String(req.body?.profile_url||'');
+   let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_profile_url'})}
+   if(u.protocol!=='https:'||u.hostname!=='www.mercadolivre.com.br'||!/^\/social\/[a-zA-Z0-9_-]{5,80}\/?$/.test(u.pathname)||u.port||u.username||u.password)return res.status(400).json({ok:false,reason:'invalid_profile_url'});
+   try{
+    const response=await fetch(u.origin+u.pathname,{redirect:'manual',headers:{Accept:'text/html','User-Agent':'FoxCore-Profile-Diagnostic/1.0'},signal:AbortSignal.timeout(6500)});
+    const contentType=response.headers.get('content-type')||'';
+    if(!response.ok||!contentType.includes('text/html'))return res.json({ok:true,http_status:response.status,status:'profile_unavailable',products:[],imported:0,affiliate_link_generated:false});
+    const html=(await response.text()).slice(0,450000);
+    const productLinks=[...html.matchAll(/(?:https?:\\\/\\\/|https?:\/\/|\/)(?:produto\.)?mercadolivre\.com\.br\/[^"'<>\\\s]{0,350}?MLB-?(\d{7,15})[^"'<>\\\s]*/gi)];
+    const codes=[...new Set([...html.matchAll(/MLB-?(\d{7,15})/gi)].map(m=>'MLB'+m[1]))].slice(0,35);
+    const products=codes.map(code=>({product_code:code,product_url:null,confirmed_from_offer:false}));
+    return res.json({ok:true,http_status:response.status,status:codes.length?'profile_product_candidates_found':'profile_requires_browser_or_api',products,product_links_detected:productLinks.length,html_bytes:html.length,offer_match_verified:false,imported:0,affiliate_link_generated:false});
+   }catch{return res.json({ok:true,status:'profile_fetch_failed',products:[],imported:0,affiliate_link_generated:false})}
+  }
   if(action==='validate_short_links'&&req.method==='POST'){
    const links=req.body?.links;
    if(!Array.isArray(links)||links.length<1||links.length>5)return res.status(400).json({ok:false,reason:'invalid_batch'});
