@@ -41,13 +41,13 @@ module.exports=async function(req,res){
     if(item.id!==code)return res.json({ok:true,status:'item_id_mismatch',product_verified:false,offer_identity_verified:false,price_verified:false});
     const price=typeof item.price==='number'&&item.price>0?item.price:null;
     const regular=typeof item.original_price==='number'&&item.original_price>0?item.original_price:null;
-    const normalized=t=>String(t||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().match(/[a-z0-9]+/g)||[];
+    const normalized=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().match(/[a-z0-9]+/g)||[];
     const stop=new Set(['para','com','original','mercado','livre','produto','novo','uma','dos','das','por']);
     const sourceTerms=new Set(normalized(offer.title).filter(t=>t.length>2&&!stop.has(t)));
     const targetTerms=new Set(normalized(item.title).filter(t=>t.length>2&&!stop.has(t)));
     const shared=[...sourceTerms].filter(t=>targetTerms.has(t));
-    const sourceModels=[...sourceTerms].filter(t=>/[a-z]/.test(t)&&/\\d/.test(t));
-    const targetModels=[...targetTerms].filter(t=>/[a-z]/.test(t)&&/\\d/.test(t));
+    const sourceModels=[...sourceTerms].filter(t=>/[a-z]/.test(t)&&/\d/.test(t));
+    const targetModels=[...targetTerms].filter(t=>/[a-z]/.test(t)&&/\d/.test(t));
     const modelConflict=sourceModels.length>0&&targetModels.length>0&&!sourceModels.some(t=>targetModels.includes(t));
     const similarity=sourceTerms.size&&targetTerms.size?Math.round(100*2*shared.length/(sourceTerms.size+targetTerms.size)):0;
     const identityAssessment=modelConflict?'model_conflict':similarity>=75?'strong_title_similarity_unverified':similarity>=40?'partial_title_similarity':'insufficient_title_evidence';
