@@ -8,8 +8,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Instalar dependencias
@@ -22,7 +22,7 @@ jobs:
         run: python engine/browser_probe.py offers.json > diagnostic.json
       - name: Salvar diagnostico sem publicar ofertas
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pechinchou-browser-diagnostic
           path: |
