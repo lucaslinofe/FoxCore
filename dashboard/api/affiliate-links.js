@@ -29,13 +29,13 @@ module.exports=async function(req,res){
    try{
     const response=await fetch(u.origin+u.pathname,{redirect:'manual',headers:{Accept:'text/html','User-Agent':'FoxCore-Profile-Diagnostic/1.0'},signal:AbortSignal.timeout(6500)});
     const contentType=response.headers.get('content-type')||'';
-    if(!response.ok||!contentType.includes('text/html'))return res.json({ok:true,http_status:response.status,status:'profile_unavailable',products:[],imported:0,affiliate_link_generated:false});
+    if(!response.ok||!contentType.includes('text/html'))return res.json({ok:true,http_status:response.status,content_type:contentType.split(';')[0],status:response.status===403?'profile_access_denied':response.status===429?'profile_rate_limited':response.status>=300&&response.status<400?'profile_redirected':'profile_unavailable',products:[],next_step:'browser_navigation_required',imported:0,affiliate_link_generated:false});
     const html=(await response.text()).slice(0,450000);
     const productLinks=[...html.matchAll(/(?:https?:\\\/\\\/|https?:\/\/|\/)(?:produto\.)?mercadolivre\.com\.br\/[^"'<>\\\s]{0,350}?MLB-?(\d{7,15})[^"'<>\\\s]*/gi)];
     const codes=[...new Set([...html.matchAll(/MLB-?(\d{7,15})/gi)].map(m=>'MLB'+m[1]))].slice(0,35);
     const products=codes.map(code=>({product_code:code,product_url:null,confirmed_from_offer:false}));
     return res.json({ok:true,http_status:response.status,status:codes.length?'profile_product_candidates_found':'profile_requires_browser_or_api',products,product_links_detected:productLinks.length,html_bytes:html.length,offer_match_verified:false,imported:0,affiliate_link_generated:false});
-   }catch{return res.json({ok:true,status:'profile_fetch_failed',products:[],imported:0,affiliate_link_generated:false})}
+   }catch{return res.json({ok:true,status:'profile_fetch_failed',next_step:'browser_navigation_required',products:[],imported:0,affiliate_link_generated:false})}
   }
   if(action==='validate_short_links'&&req.method==='POST'){
    const links=req.body?.links;
