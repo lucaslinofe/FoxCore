@@ -1,0 +1,32 @@
+name: Diagnostico navegador Pechinchou
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: |
+          python -m pip install requests==2.32.5 playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Coletar links atuais do Pechinchou
+        run: python engine/pechinchou_collect_probe.py offers.json
+      - name: Inspecionar navegacao e anuncios
+        run: python engine/browser_probe.py offers.json > diagnostic.json
+      - name: Salvar diagnostico sem publicar ofertas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pechinchou-browser-diagnostic
+          path: |
+            offers.json
+            diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
