@@ -30,7 +30,7 @@ module.exports=async function(req,res){
    const offer=rows[0];
    if(!offer||!(offer.candidate_matches||[]).some(x=>x.product_code===code))return res.status(404).json({ok:false,reason:'candidate_not_registered'});
    const registered=offer.candidate_matches.find(x=>x.product_code===code);
-   const catalog=registered.product_code_type==='catalog_product'||(!registered.product_code_type&&/^https:\/\/[^/]+\/p\/MLB\\d{7,15}/i.test(registered.product_url||''));
+   const catalog=registered.product_code_type==='catalog_product'||(!registered.product_code_type&&/^https:\/\/[^/]+\/p\/MLB\d{7,15}/i.test(registered.product_url||''));
    const apiPath=catalog?'products/':'items/';
    const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
    let accessToken=null;
