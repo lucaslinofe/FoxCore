@@ -98,7 +98,7 @@ def pechinchou_diagnostic():
                 state=lookup["status"]
                 api_statuses[state]=api_statuses.get(state,0)+1
                 db("fox_pechinchou_queue","PATCH",{
-                    "candidate_matches":lookup["candidates"],
+                    **({"candidate_matches":lookup["candidates"]} if lookup["candidates"] else {}),
                     "last_match_status":state,
                     "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
                 },params={"short_url":"eq."+offer["short_url"]})
