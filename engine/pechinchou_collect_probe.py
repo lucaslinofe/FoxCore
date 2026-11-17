@@ -5,18 +5,28 @@ import requests
 
 SOURCE="https://pechinchou.com.br/lojas/mercadolivre.com.br"
 SHORT=re.compile(r"^https://meli\.la/[A-Za-z0-9_-]{3,80}/?$")
-def collect():
+def collect(with_diagnostics=False):
     response=requests.get(SOURCE,timeout=20,headers={"User-Agent":"FoxCore-Readiness/1.0"})
     response.raise_for_status()
     match=re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',response.text,re.S)
     if not match:raise RuntimeError("No Next.js data found")
     root=json.loads(unescape(match.group(1)))
     offers={}
+    schema_fields={}
     def walk(node, depth=0):
         if depth>35:return
         if isinstance(node,dict):
             links=[v for k,v in node.items() if isinstance(v,str) and (k in ("long_url","short_url","affiliate_url") or "meli.la/" in v) and SHORT.fullmatch(v)]
             if links:
+                # Only field names and value types, never raw seller data or URLs.
+                for key,value in node.items():
+                    if isinstance(key,str) and len(key)<90:
+                        kind=("number" if isinstance(value,(float,int)) and not isinstance(value,bool)
+                              else "string" if isinstance(value,str)
+                              else "object" if isinstance(value,dict)
+                              else "array" if isinstance(value,list) else "other")
+                        signature=key+":"+kind
+                        schema_fields[signature]=schema_fields.get(signature,0)+1
                 title=next((str(node.get(k)) for k in ("title","name","product_name","description") if isinstance(node.get(k),str)),"")
                 # Only direct product URLs in the SAME source object count as evidence.
                 direct=[]
@@ -56,6 +66,9 @@ def collect():
         elif isinstance(node,list):
             for value in node:walk(value,depth+1)
     walk(root)
-    return list(offers.values())[:30]
+    result=list(offers.values())[:30]
+    if with_diagnostics:
+        return result,{"offer_field_signatures":dict(sorted(schema_fields.items(),key=lambda kv:-kv[1])[:50])}
+    return result
 if __name__=="__main__":
     with open(sys.argv[1] if len(sys.argv)>1 else "offers.json","w",encoding="utf8") as f:json.dump(collect(),f,ensure_ascii=False,indent=2)
