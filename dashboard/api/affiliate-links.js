@@ -22,6 +22,28 @@ module.exports=async function(req,res){
     return res.json({ok:true,status:'oauth_search_available',products:results.length,results,verified_matches:0,affiliate_links_generated:0});
    }catch{return res.json({ok:true,status:'oauth_search_network_error',products:0})}
   }
+  if(action==='inspect_product_candidate'&&req.method==='POST'){
+   const short=String(req.body?.short_url||'');
+   const code=String(req.body?.product_code||'');
+   if(!VALID.test(short)||!/^MLB\\d{7,15}$/.test(code))return res.status(400).json({ok:false,reason:'invalid_candidate'});
+   const rows=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,candidate_matches,source_metadata&short_url=eq.'+encodeURIComponent(short)+'&limit=1');
+   const offer=rows[0];
+   if(!offer||!(offer.candidate_matches||[]).some(x=>x.product_code===code))return res.status(404).json({ok:false,reason:'candidate_not_registered'});
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   let accessToken=null;
+   if(tokens[0]&&Date.parse(tokens[0].expires_at)>Date.now()+60000){
+    try{accessToken=decrypt(tokens[0].encrypted_payload).access_token||null}catch{}
+   }
+   try{
+    const response=await fetch('https://api.mercadolibre.com/items/'+encodeURIComponent(code),{headers:{Accept:'application/json',...(accessToken?{Authorization:'Bearer '+accessToken}:{})},redirect:'manual',signal:AbortSignal.timeout(8000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===403?'provider_forbidden':response.status===429?'provider_rate_limited':response.status===401?'provider_unauthorized':'provider_unavailable',http_status:response.status,product_verified:false,offer_identity_verified:false,price_verified:false});
+    const item=await response.json();
+    if(item.id!==code)return res.json({ok:true,status:'item_id_mismatch',product_verified:false,offer_identity_verified:false,price_verified:false});
+    const price=typeof item.price==='number'&&item.price>0?item.price:null;
+    const regular=typeof item.original_price==='number'&&item.original_price>0?item.original_price:null;
+    return res.json({ok:true,status:'item_api_accessible',product_verified:true,offer_identity_verified:false,product_code:code,title:String(item.title||'').slice(0,200),currency:item.currency_id||null,price,reference_price:regular,price_verified:price!==null,price_source:'mercado_livre_items_api',checked_at:new Date().toISOString(),pix_price:null,pix_price_verified:false,coupon_price:null,coupon_price_verified:false,affiliate_link_generated:false,published:false});
+   }catch{return res.json({ok:true,status:'provider_network_error',product_verified:false,offer_identity_verified:false,price_verified:false})}
+  }
   if(action==='record_manual_product_candidate'&&req.method==='POST'){
    const short=String(req.body?.short_url||'');
    const raw=String(req.body?.product_url||'');
