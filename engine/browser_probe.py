@@ -28,7 +28,12 @@ def inspect(offers):
                     page.wait_for_timeout(1200)
                     final=urlsplit(page.url)
                     if final.scheme!="https" or final.hostname not in HOSTS:
-                        result["status"]="unapproved_destination";output.append(result);continue
+                        result["status"]="unapproved_destination"
+                        result["destination_scheme"]=final.scheme
+                        result["destination_host"]=final.hostname or ""
+                        result["destination_path"]=final.path[:180]
+                        result["page_title"]=(page.title() or "")[:140]
+                        output.append(result);continue
                     result["profile_url"]=final.scheme+"://"+final.netloc+final.path
                     links=page.locator("a[href]").evaluate_all("""nodes=>nodes.slice(0,1000).map(a=>({href:a.href,label:(a.innerText||a.getAttribute('aria-label')||'').trim().slice(0,120)}))""")
                     seen=set()
@@ -42,8 +47,10 @@ def inspect(offers):
                     result["status"]="product_candidates_found" if seen else "no_product_links_in_dom"
                 except BrowserTimeout:
                     result["status"]="navigation_timeout"
+                    result["last_host"]=urlsplit(page.url).hostname or ""
                 except Exception:
                     result["status"]="browser_navigation_failed"
+                    result["last_host"]=urlsplit(page.url).hostname or ""
                 finally:
                     context.close()
                 output.append(result)
