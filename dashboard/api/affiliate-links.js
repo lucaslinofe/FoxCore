@@ -56,11 +56,11 @@ module.exports=async function(req,res){
      const destination=normalizeUrl(rawUrl);
      const rawPrice=value.price??value.salePrice??value.offers?.price??null;
      const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
-     const code=destination?.match(/MLB-?(\d{7,15})/i)?.[1]||null;
-     const isProduct=type==='Product'||(title&&destination&&(price!==null||code));
+     const rawCode=value.productId??value.itemId??value.mlb??value.sku??null;const code=destination?.match(/MLB-?(\d{7,15})/i)?.[1]||String(rawCode||'').match(/^MLB-?(\d{7,15})$/i)?.[1]||null;
+     const keys=Object.keys(value);const productHints=keys.some(k=>/^(?:product|productId|itemId|sku|originalPrice|discount|salePrice|image|images|thumbnail|merchant|seller|offers|price|category)$/i.test(k));const generic=/^(?:mercado livre|pechinchou|ofertas|promoções|loja)$/i.test((title||'').trim());const isProduct=!generic&&(type==='Product'||(title&&title.length>12&&(productHints||!!code||!!destination)));
      if(isProduct&&title&&title.length>8&&candidates.size<80){
       const key=(code?'MLB'+code:destination||title.toLowerCase()).slice(0,260);
-      if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,validation:code&&destination?'product_url_identified':'needs_destination_verification',affiliate_link_generated:false,verified_offer:false});
+      if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,validation:code&&destination?'product_url_identified':destination?'needs_product_identity':code?'needs_destination_verification':'discovered_unverified',affiliate_link_generated:false,verified_offer:false});
      }
      for(const key of Object.keys(value).slice(0,100))walk(value[key],origin,depth+1);
     };
@@ -69,6 +69,9 @@ module.exports=async function(req,res){
     const ldBlocks=[...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].slice(0,12);
     for(const block of ldBlocks){try{const obj=JSON.parse(block[1]);structured.json_ld_parseable++;walk(obj,'json_ld')}catch{}}
     structured.candidate_count=candidates.size;
+    structured.discovery_count=candidates.size;
+    structured.enriched_count=[...candidates.values()].filter(p=>p.destination||p.price||p.product_code).length;
+    structured.validated_count=0;
     structured.candidates=[...candidates.values()].slice(0,15);
     structured.product_samples=structured.candidates.slice(0,8);
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
