@@ -1,10 +1,27 @@
-const {db,authenticated}=require('./auth/mercadolivre/_shared');
+const {db,authenticated,decrypt}=require('./auth/mercadolivre/_shared');
 const VALID=/^https:\/\/meli\.la\/[A-Za-z0-9_-]{3,80}\/?$/;
 module.exports=async function(req,res){
  res.setHeader('Cache-Control','no-store');
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   const action=String(req.query?.action||req.body?.action||'');
+  if(action==='mercadolivre_oauth_search_probe'&&req.method==='POST'){
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   if(!tokens.length)return res.json({ok:true,status:'oauth_not_connected',products:0});
+   if(Date.parse(tokens[0].expires_at)<=Date.now()+60000)return res.json({ok:true,status:'oauth_token_expired',products:0});
+   let accessToken;try{accessToken=decrypt(tokens[0].encrypted_payload).access_token}catch{return res.json({ok:true,status:'oauth_token_unreadable',products:0})}
+   if(!accessToken)return res.json({ok:true,status:'oauth_token_unavailable',products:0});
+   const title=String(req.body?.title||'').trim().slice(0,120);
+   if(title.length<8)return res.status(400).json({ok:false,reason:'invalid_title'});
+   try{
+    const url='https://api.mercadolibre.com/sites/MLB/search?'+new URLSearchParams({q:title,limit:'5'});
+    const response=await fetch(url,{headers:{Authorization:'Bearer '+accessToken,Accept:'application/json'},redirect:'manual',signal:AbortSignal.timeout(9000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===403?'oauth_search_forbidden':response.status===401?'oauth_search_unauthorized':response.status===429?'oauth_search_rate_limited':'oauth_search_unavailable',http_status:response.status,products:0});
+    const data=await response.json();
+    const results=(Array.isArray(data.results)?data.results:[]).slice(0,5).filter(x=>/^MLB\\d{7,15}$/.test(String(x.id||''))).map(x=>({product_code:x.id,title:String(x.title||'').slice(0,180)}));
+    return res.json({ok:true,status:'oauth_search_available',products:results.length,results,verified_matches:0,affiliate_links_generated:0});
+   }catch{return res.json({ok:true,status:'oauth_search_network_error',products:0})}
+  }
   if(action==='pechinchou_queue'&&req.method==='GET'){
    const offers=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,status,product_code,product_url,updated_at,candidate_matches,last_match_status,last_match_attempt_at&order=updated_at.desc&limit=100');
    return res.json({ok:true,offers,published:false,automatic_affiliate_generation:false});
