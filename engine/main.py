@@ -1,4 +1,5 @@
 import os, time, json, hashlib, logging
+from datetime import timedelta
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -50,26 +51,49 @@ def pechinchou_diagnostic():
         suggestions=[]
         api_statuses={}
         api_candidate_offers=0
-        # Rate-limited public discovery: at most 5 searches per 8-hour cycle.
-        for offer in offers[:5]:
-            lookup=search_candidates(offer)
-            state=lookup["status"]
-            api_statuses[state]=api_statuses.get(state,0)+1
-            if lookup["candidates"]:
-                api_candidate_offers+=1
-                suggestions.append({"offer_title":offer.get("title","")[:160],
-                    "source":"mercadolivre_public_search","candidates":lookup["candidates"]})
-            if state=="api_access_restricted":break
+        # Continue automated attempts, but respect 403/429 with a 24-hour cooldown.
+        history=db("fox_runs",params={"select":"finished_at,details",
+            "module":"eq.PechinchouDiagnostic","order":"finished_at.desc","limit":"1"})
+        last=history[0] if history else {}
+        prior=last.get("details") or {}
+        restricted_at=prior.get("api_restricted_at")
+        cooldown=False
+        if restricted_at:
+            try:
+                restricted_dt=datetime.fromisoformat(restricted_at.replace("Z","+00:00"))
+                cooldown=datetime.now(timezone.utc)-restricted_dt<timedelta(hours=24)
+            except (ValueError,TypeError):pass
+        next_offset=int(prior.get("search_offset",0) or 0)
+        next_offset=next_offset%max(1,len(offers))
+        if cooldown:
+            api_statuses["cooldown_after_access_restriction"]=1
+        else:
+            batch=(offers[next_offset:]+offers[:next_offset])[:5]
+            for offer in batch:
+                lookup=search_candidates(offer)
+                state=lookup["status"]
+                api_statuses[state]=api_statuses.get(state,0)+1
+                if lookup["candidates"]:
+                    api_candidate_offers+=1
+                    suggestions.append({"offer_title":offer.get("title","")[:160],
+                        "source":"mercadolivre_public_search","candidates":lookup["candidates"]})
+                next_offset=(next_offset+1)%max(1,len(offers))
+                if state=="api_access_restricted":
+                    restricted_at=datetime.now(timezone.utc).isoformat()
+                    break
+            else:
+                restricted_at=None
         for offer in offers:
             matches=rank(offer,catalog)
             if matches:
                 suggestions.append({"offer_title":offer.get("title","")[:160],"candidates":matches})
         summary={"collected":len(offers),"short_links":sum(bool(o.get("short_url")) for o in offers),
                  "identified_products":0,"imported":0,"published":0,
-                 "reason":"Short-link redirects return 403 in automated environments; no verified MLB match",
+                 "reason":"Mercado Livre public search access restricted; automated retry uses cooldown. No verified MLB match." if restricted_at else "No verified MLB match; automated candidate search active.",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
                  "new_queue_items":queued,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
+                 "api_restricted_at":restricted_at,"search_offset":next_offset,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
         db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"success",
             "finished_at":datetime.now(timezone.utc).isoformat(),"details":summary})
