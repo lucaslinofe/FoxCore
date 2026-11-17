@@ -5,6 +5,10 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   const action=String(req.query?.action||req.body?.action||'');
+  if(action==='pechinchou_queue'&&req.method==='GET'){
+   const offers=await db('fox_pechinchou_queue','GET',null,'?select=short_url,title,status,product_code,product_url,updated_at&order=updated_at.desc&limit=100');
+   return res.json({ok:true,offers,published:false,automatic_affiliate_generation:false});
+  }
   if(action==='pechinchou_automatic_status'&&req.method==='GET'){
    const runs=await db('fox_runs','GET',null,'?select=status,finished_at,details&module=eq.PechinchouDiagnostic&order=finished_at.desc&limit=5');
    return res.json({ok:true,diagnostic_scheduled:true,interval_hours:8,latest:runs[0]||null,history:runs,product_identification_automated:false,affiliate_generation_automated:false,publishing_enabled:false});
