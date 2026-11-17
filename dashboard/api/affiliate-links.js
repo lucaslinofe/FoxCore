@@ -52,15 +52,15 @@ module.exports=async function(req,res){
      if(Array.isArray(value)){for(const item of value.slice(0,150))walk(item,origin,depth+1);return}
      const type=String(value['@type']||'');
      const title=typeof value.name==='string'?value.name:typeof value.title==='string'?value.title:null;
-     const rawUrl=typeof value.url==='string'?value.url:typeof value.productUrl==='string'?value.productUrl:typeof value.link==='string'?value.link:null;
+     const urlFields=['url','productUrl','product_url','link','permalink','href','externalUrl','destinationUrl','affiliateUrl'];const rawUrl=urlFields.map(k=>value[k]).find(v=>typeof v==='string')||value.offers?.url||null;
      const destination=normalizeUrl(rawUrl);
-     const rawPrice=value.price??value.salePrice??value.offers?.price??null;
+     const offers=Array.isArray(value.offers)?value.offers[0]:value.offers;const rawPrice=value.price??value.salePrice??offers?.price??offers?.lowPrice??null;
      const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
      const rawCode=value.productId??value.itemId??value.mlb??value.sku??null;const code=destination?.match(/MLB-?(\d{7,15})/i)?.[1]||String(rawCode||'').match(/^MLB-?(\d{7,15})$/i)?.[1]||null;
-     const keys=Object.keys(value);const productHints=keys.some(k=>/^(?:product|productId|itemId|sku|originalPrice|discount|salePrice|image|images|thumbnail|merchant|seller|offers|price|category)$/i.test(k));const generic=/^(?:mercado livre|pechinchou|ofertas|promoções|loja)$/i.test((title||'').trim());const isProduct=!generic&&(type==='Product'||(title&&title.length>12&&(productHints||!!code||!!destination)));
+     const keys=Object.keys(value);const categoryLike=type==='CollectionPage'||type==='ItemList'||type==='BreadcrumbList'||type==='Category'||keys.some(k=>/^(?:children|subcategories|categoryChildren|departments)$/i.test(k))&&!keys.some(k=>/^(?:price|salePrice|originalPrice|sku|productId|itemId)$/i.test(k));const productHints=keys.some(k=>/^(?:product|productId|itemId|sku|originalPrice|discount|salePrice|image|images|thumbnail|merchant|seller|offers|price|category)$/i.test(k));const generic=/^(?:mercado livre|pechinchou|ofertas|promoções|loja)$/i.test((title||'').trim());const isProduct=!generic&&!categoryLike&&(type==='Product'||(title&&title.length>12&&(price!==null||!!code||!!destination||productHints&&keys.some(k=>/^(?:sku|productId|itemId|image|images|thumbnail|seller|merchant)$/i.test(k)))));
      if(isProduct&&title&&title.length>8&&candidates.size<80){
       const key=(code?'MLB'+code:destination||title.toLowerCase()).slice(0,260);
-      if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,validation:code&&destination?'product_url_identified':destination?'needs_product_identity':code?'needs_destination_verification':'discovered_unverified',affiliate_link_generated:false,verified_offer:false});
+      if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,validation:code&&destination?'product_url_identified':destination?'needs_product_identity':code?'needs_destination_verification':'discovered_unverified',affiliate_link_generated:false,verified_offer:false});else {const existing=candidates.get(key);if(!existing.destination&&destination)existing.destination=destination;if(!existing.price&&price)existing.price=price;if(!existing.product_code&&code)existing.product_code='MLB'+code;}
      }
      for(const key of Object.keys(value).slice(0,100))walk(value[key],origin,depth+1);
     };
@@ -72,6 +72,8 @@ module.exports=async function(req,res){
     structured.discovery_count=candidates.size;
     structured.enriched_count=[...candidates.values()].filter(p=>p.destination||p.price||p.product_code).length;
     structured.validated_count=0;
+    structured.missing_destination_count=[...candidates.values()].filter(p=>!p.destination).length;
+    structured.category_filter_applied=true;
     structured.candidates=[...candidates.values()].slice(0,15);
     structured.product_samples=structured.candidates.slice(0,8);
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
