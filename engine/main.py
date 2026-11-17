@@ -35,6 +35,16 @@ def pechinchou_diagnostic():
     started=datetime.now(timezone.utc).isoformat()
     try:
         offers=collect()
+        queued=0
+        for offer in offers:
+            short=offer.get("short_url","")
+            if not short.startswith("https://meli.la/"):continue
+            # Upsert only source metadata; never overwrite a reviewed product association.
+            existing=db("fox_pechinchou_queue",params={"select":"short_url","short_url":"eq."+short,"limit":"1"})
+            if not existing:
+                db("fox_pechinchou_queue","POST",{"short_url":short,"title":offer.get("title","")[:240],
+                    "status":"awaiting_product_identification"})
+                queued+=1
         # Compare only with catalog entries already verified and stored internally.
         catalog=db("fox_discovered_products",params={"select":"product_code,title,status","limit":"500"})
         suggestions=[]
@@ -58,7 +68,7 @@ def pechinchou_diagnostic():
                  "identified_products":0,"imported":0,"published":0,
                  "reason":"Short-link redirects return 403 in automated environments; no verified MLB match",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
-                 "candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "new_queue_items":queued,"candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
                  "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
         db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"success",
