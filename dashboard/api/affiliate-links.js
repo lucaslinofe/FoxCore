@@ -16,27 +16,28 @@ module.exports=async function(req,res){
    const link=found[0];
    const expected=(link.product_url||'').match(/MLB-?(\d{7,15})/i)?.[1];
    if(!expected)return res.status(409).json({ok:false,reason:'product_id_missing'});
-   let current=link.affiliate_url,finalUrl=null,matched=false,reason='redirect_not_confirmed';
+   let current=link.affiliate_url,matched=false,reason='redirect_not_confirmed',httpStatus=null;
+   const allowed=new Set(['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','lista.mercadolivre.com.br']);
    try{
-    for(let i=0;i<5;i++){
+    for(let i=0;i<7;i++){
      const u=new URL(current);
-     if(u.protocol!=='https:'||!['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname))break;
-     const response=await fetch(u.toString(),{method:'GET',redirect:'manual',signal:AbortSignal.timeout(7000),headers:{'User-Agent':'FoxCore-LinkValidator/1.0'}});
+     if(u.protocol!=='https:'||u.port||u.username||u.password||!allowed.has(u.hostname.toLowerCase())){reason='unsupported_redirect_domain';break}
+     const productMatch=u.pathname.match(/MLB-?(\\d{7,15})/i);
+     if(productMatch){matched=productMatch[1]===expected;reason=matched?'destination_matches_product':'different_product';break}
+     const response=await fetch(u.toString(),{method:'GET',redirect:'manual',signal:AbortSignal.timeout(7000),headers:{'User-Agent':'Mozilla/5.0 (compatible; FoxCoreLinkCheck/1.0)'}});
+     httpStatus=response.status;
+     if([401,403,429].includes(response.status)){reason='provider_blocked';break}
      if(response.status>=300&&response.status<400){
       const location=response.headers.get('location');
-      if(!location)break;
-      current=new URL(location,current).toString();continue;
+      if(!location){reason='redirect_without_location';break}
+      current=new URL(location,current).toString();
+      reason='redirect_not_confirmed';continue;
      }
-     finalUrl=current;
+     reason=response.ok?'destination_unconfirmed':'provider_http_error';
      break;
     }
-    const u=new URL(finalUrl||current);
-    if(['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname)){
-      matched=Boolean(u.pathname.match(/MLB-?(\d{7,15})/i)?.[1]===expected);
-      reason=matched?'destination_matches_product':'destination_unconfirmed';
-    }
    }catch(_){reason='redirect_check_failed'}
-   return res.json({ok:true,destination_matches:matched,reason,commission_verified:false,verification_status:'pending'});
+   return res.json({ok:true,destination_matches:matched,reason,http_status:httpStatus,commission_verified:false,verification_status:'pending'});
   }
   if(req.method==='PATCH'){
    const id=String(req.body?.id||'');
