@@ -44,28 +44,33 @@ module.exports=async function(req,res){
     const framework={nextjs:html.includes('__NEXT_DATA__')||scripts.some(x=>x.includes('/_next/')),nuxt:html.includes('__NUXT__')||scripts.some(x=>x.includes('/_nuxt/')),react:html.includes('react-dom')||html.includes('data-reactroot'),json_ld:html.includes('application/ld+json')};
     const inlineScriptCount=(html.match(/<script\b(?![^>]*\bsrc\s*=)/gi)||[]).length;
     const dataSignals={graphql:html.includes('graphql'),api_routes:html.includes('/api/'),hydration:html.includes('__NEXT_DATA__')||html.includes('__NUXT__'),product_schema:html.includes('schema.org/Product')};
-    const structured={next_data_present:false,next_data_parseable:false,next_data_page:null,next_data_product_like_objects:0,json_ld_parseable:0,json_ld_product_objects:0,product_samples:[]};
-    const sampleProducts=[];
-    const walk=(value,depth=0)=>{
-     if(depth>12||!value||typeof value!=='object'||sampleProducts.length>=8)return;
-     if(Array.isArray(value)){for(const item of value.slice(0,100))walk(item,depth+1);return}
-     const keys=Object.keys(value);
-     const name=typeof value.name==='string'?value.name:typeof value.title==='string'?value.title:null;
-     const url=typeof value.url==='string'?value.url:typeof value.productUrl==='string'?value.productUrl:null;
-     const price=value.price??value.lowPrice??value.salePrice;
+    const structured={next_data_present:false,next_data_parseable:false,next_data_page:null,json_ld_parseable:0,candidates:[],candidate_count:0,eligible_for_import:0,blocked_reason:'source_not_authorized'};
+    const candidates=new Map();
+    const normalizeUrl=(raw)=>{if(typeof raw!=='string')return null;try{const u=new URL(raw,source);if(u.protocol!=='https:'||u.username||u.password||u.port)return null;if(!['pechinchou.com.br','www.pechinchou.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','mercadolivre.com.br'].includes(u.hostname))return null;return u.origin+u.pathname.slice(0,240)}catch{return null}};
+    const walk=(value,origin,depth=0)=>{
+     if(depth>14||!value||typeof value!=='object')return;
+     if(Array.isArray(value)){for(const item of value.slice(0,150))walk(item,origin,depth+1);return}
      const type=String(value['@type']||'');
-     if((type==='Product'||(name&&(url||price!==undefined)))&&sampleProducts.length<8){
-      structured.next_data_product_like_objects++;
-      let destination=null;try{if(url){const u=new URL(url,source);if(u.protocol==='https:'&&['pechinchou.com.br','www.pechinchou.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','mercadolivre.com.br'].includes(u.hostname))destination=u.origin+u.pathname.slice(0,160)}}catch{}
-      sampleProducts.push({title:name?.slice(0,100)||null,destination,price:typeof price==='number'||typeof price==='string'?String(price).slice(0,30):null,type:type||'untyped',verified_offer:false});
+     const title=typeof value.name==='string'?value.name:typeof value.title==='string'?value.title:null;
+     const rawUrl=typeof value.url==='string'?value.url:typeof value.productUrl==='string'?value.productUrl:typeof value.link==='string'?value.link:null;
+     const destination=normalizeUrl(rawUrl);
+     const rawPrice=value.price??value.salePrice??value.offers?.price??null;
+     const price=typeof rawPrice==='number'||typeof rawPrice==='string'?String(rawPrice).slice(0,30):null;
+     const code=destination?.match(/MLB-?(\d{7,15})/i)?.[1]||null;
+     const isProduct=type==='Product'||(title&&destination&&(price!==null||code));
+     if(isProduct&&title&&title.length>8&&candidates.size<80){
+      const key=(code?'MLB'+code:destination||title.toLowerCase()).slice(0,260);
+      if(!candidates.has(key))candidates.set(key,{title:title.slice(0,150),destination,price,product_code:code?'MLB'+code:null,origin,validation:code&&destination?'product_url_identified':'needs_destination_verification',affiliate_link_generated:false,verified_offer:false});
      }
-     for(const key of keys.slice(0,100))walk(value[key],depth+1);
+     for(const key of Object.keys(value).slice(0,100))walk(value[key],origin,depth+1);
     };
     const nextMatch=html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
-    if(nextMatch){structured.next_data_present=true;try{const data=JSON.parse(nextMatch[1]);structured.next_data_parseable=true;structured.next_data_page=typeof data.page==='string'?data.page.slice(0,100):null;walk(data.props)}catch{}}
+    if(nextMatch){structured.next_data_present=true;try{const data=JSON.parse(nextMatch[1]);structured.next_data_parseable=true;structured.next_data_page=typeof data.page==='string'?data.page.slice(0,100):null;walk(data.props,'next_data')}catch{}}
     const ldBlocks=[...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].slice(0,12);
-    for(const block of ldBlocks){try{const obj=JSON.parse(block[1]);structured.json_ld_parseable++;const prev=sampleProducts.length;walk(obj);structured.json_ld_product_objects+=sampleProducts.length-prev}catch{}}
-    structured.product_samples=sampleProducts;
+    for(const block of ldBlocks){try{const obj=JSON.parse(block[1]);structured.json_ld_parseable++;walk(obj,'json_ld')}catch{}}
+    structured.candidate_count=candidates.size;
+    structured.candidates=[...candidates.values()].slice(0,15);
+    structured.product_samples=structured.candidates.slice(0,8);
     const jsonLd=(html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/gi)||[]).length;
     return res.json({ok:true,source,http_status:response.status,html_accessible:accessible,html_bytes:html.length,anchor_count:anchors.length,mercado_livre_link_count:mlLinks.length,redirect_link_count:redirectLinks.length,script_count:scripts.length,script_sources:scriptSources,inline_script_count:inlineScriptCount,framework,data_signals:dataSignals,json_ld_blocks:jsonLd,structured_data:structured,distinct_product_codes:codes.length,product_codes:codes.slice(0,15).map(code=>'MLB'+code),product_evidence:productEvidence,collection_enabled:false,items_imported:0,diagnosis:codes.length?'direct_product_codes_found':mlLinks.length?'mercado_livre_links_without_product_codes':redirectLinks.length?'intermediate_links_require_review':scripts.length?'javascript_or_indirect_links_possible':'no_product_signals_in_static_html'});
    }catch(_){return res.json({ok:true,source,html_accessible:false,collection_enabled:false,items_imported:0,reason:'source_access_failed'})}
