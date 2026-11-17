@@ -23,7 +23,7 @@ def collect():
                 for key,value in node.items():
                     if not isinstance(value,str) or key not in ("product_url","permalink","url","destination_url","original_url"):
                         continue
-                    match=re.match(r"^https://(?:produto\\.mercadolivre\\.com\\.br|www\\.mercadolivre\\.com\\.br|mercadolivre\\.com\\.br)/[^\\s?#]*MLB-?(\\d{7,15})(?:[^\\s?#]*)?(?:[?#].*)?$",value,re.I)
+                    match=re.match(r"^https://(?:produto\.mercadolivre\.com\.br|www\.mercadolivre\.com\.br|mercadolivre\.com\.br)/[^\s?#]*?MLB-?(\d{7,15})(?:[^\s?#]*)?(?:[?#].*)?$",value,re.I)
                     if match:
                         direct.append({"product_code":"MLB"+match.group(1),"product_url":value.split("?")[0].split("#")[0]})
                 for link in links:
