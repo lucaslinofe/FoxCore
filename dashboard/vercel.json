@@ -8,6 +8,10 @@
     {
       "path": "/api/prepare-offers",
       "schedule": "15 9 * * *"
+    },
+    {
+      "path": "/api/check-prices",
+      "schedule": "30 9 * * *"
     }
   ]
 }
