@@ -22,6 +22,35 @@ module.exports=async function(req,res){
    const [sources,links,drafts]=await Promise.all([db('fox_sources','GET',null,'?select=name,provider,enabled,authorized&provider=eq.pechinchou&limit=1'),db('fox_affiliate_links','GET',null,'?select=id&limit=200'),db('fox_offer_drafts','GET',null,'?select=affiliate_link_id&limit=200')]);const source=sources[0]||null;
    return res.json({ok:true,pechinchou:{registered:!!source,enabled:source?.enabled===true,authorized:source?.authorized===true,automatic_collection_active:false},mercado_livre:{automatic_link_generation_verified:false,registered_links:links.length},offers:{drafts:drafts.length}});
   }
+  if(action==='validate_short_links'&&req.method==='POST'){
+   const links=req.body?.links;
+   if(!Array.isArray(links)||links.length<1||links.length>5)return res.status(400).json({ok:false,reason:'invalid_batch'});
+   const check=async(raw)=>{
+    const item={short_url:raw,status:'unresolved',destination_url:null,destination_type:null,product_code:null,offer_verified:false,affiliate_for_user:false};
+    if(typeof raw!=='string'||!/^https:\/\/meli\.la\/[A-Za-z0-9_-]{3,80}\/?$/.test(raw))return {...item,status:'invalid_link'};
+    let url=new URL(raw);
+    const hosts=['meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br','lista.mercadolivre.com.br'];
+    for(let hop=0;hop<4;hop++){
+     if(url.hostname!=='meli.la'){
+      const code=url.pathname.match(/MLB-?(\d{7,15})/i)?.[1]||null;
+      const kind=url.pathname.startsWith('/social/')?'affiliate_profile':code?'product':'other_marketplace_page';
+      return {...item,status:kind==='product'?'product_destination_found':kind==='affiliate_profile'?'affiliate_profile_found':'marketplace_page_found',destination_url:url.origin+url.pathname,destination_type:kind,product_code:code?'MLB'+code:null};
+     }
+     try{
+      const response=await fetch(url.toString(),{redirect:'manual',headers:{Accept:'text/html','User-Agent':'FoxCore-Link-Diagnostic/1.1'},signal:AbortSignal.timeout(2500)});
+      if([401,403,429].includes(response.status))return {...item,status:'provider_blocked',http_status:response.status};
+      if(response.status<300||response.status>=400)return {...item,status:response.ok?'short_link_no_redirect':'provider_http_error',http_status:response.status};
+      const location=response.headers.get('location');if(!location)return {...item,status:'missing_redirect_location'};
+      const next=new URL(location,url);
+      if(next.protocol!=='https:'||next.port||next.username||next.password||!hosts.includes(next.hostname.toLowerCase())||next.href.length>2048)return {...item,status:'redirect_to_unapproved_host'};
+      url=next;
+     }catch{return {...item,status:'network_error'}}
+    }
+    return {...item,status:'redirect_hop_limit'};
+   };
+   const checks=await Promise.all(links.map(check));
+   return res.json({ok:true,checks,checked:checks.length,diagnostic_only:true,imported:0,affiliate_link_generated:false});
+  }
   if(action==='pechinchou_probe'&&req.method==='GET'){
    const source='https://pechinchou.com.br/lojas/mercadolivre.com.br';
    try{
@@ -97,6 +126,7 @@ module.exports=async function(req,res){
     structured.product_code_fields=schemaEvidence.product_code_fields.slice(0,30);
     structured.destination_types=schemaEvidence.destination_types;
     structured.product_samples=structured.candidates.slice(0,8);
+    structured.short_links=[...new Set([...candidates.values()].map(p=>p.marketplace_short_url).filter(Boolean))].slice(0,30);
 
     if(String(req.query?.validate_links||'')==='1'){
      const items=[...candidates.values()].filter(p=>p.marketplace_short_url);
