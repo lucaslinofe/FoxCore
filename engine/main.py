@@ -6,6 +6,7 @@ from threading import Thread
 import requests
 from pechinchou_collect_probe import collect
 from product_matcher import rank
+from mercadolivre_search import search_candidates
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -37,6 +38,18 @@ def pechinchou_diagnostic():
         # Compare only with catalog entries already verified and stored internally.
         catalog=db("fox_discovered_products",params={"select":"product_code,title,status","limit":"500"})
         suggestions=[]
+        api_statuses={}
+        api_candidate_offers=0
+        # Rate-limited public discovery: at most 5 searches per 8-hour cycle.
+        for offer in offers[:5]:
+            lookup=search_candidates(offer)
+            state=lookup["status"]
+            api_statuses[state]=api_statuses.get(state,0)+1
+            if lookup["candidates"]:
+                api_candidate_offers+=1
+                suggestions.append({"offer_title":offer.get("title","")[:160],
+                    "source":"mercadolivre_public_search","candidates":lookup["candidates"]})
+            if state=="api_access_restricted":break
         for offer in offers:
             matches=rank(offer,catalog)
             if matches:
@@ -46,6 +59,7 @@ def pechinchou_diagnostic():
                  "reason":"Short-link redirects return 403 in automated environments; no verified MLB match",
                  "sample_titles":[o.get("title","")[:100] for o in offers[:3]],
                  "candidate_catalog_size":len(catalog),"candidate_offers":len(suggestions),
+                 "api_statuses":api_statuses,"api_candidate_offers":api_candidate_offers,
                  "suggestions":suggestions[:20],"diagnostic_only":True}
         db("fox_runs","POST",{"module":"PechinchouDiagnostic","status":"success",
             "finished_at":datetime.now(timezone.utc).isoformat(),"details":summary})
