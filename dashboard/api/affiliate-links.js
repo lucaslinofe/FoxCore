@@ -13,6 +13,27 @@ module.exports=async function(req,res){
     return res.json({ok:true,connected,credential_source:configured?'Vercel':rows.length?'Supabase OAuth':null,queue_ready:false,api_verified:false});
    }catch{return res.status(503).json({ok:false,reason:'status_unavailable'});}
   }
+  if(action==='meli_random10'&&req.method==='GET'){
+   const terms=['fone bluetooth','cafeteira','parafusadeira','mochila','mouse sem fio','ventilador','panela','tenis esportivo','smartwatch','luminaria'];
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   if(!tokens.length)return res.json({ok:true,status:'oauth_not_connected',items:[]});
+   if(!tokens[0].expires_at||Date.parse(tokens[0].expires_at)<=Date.now()+60000)return res.json({ok:true,status:'oauth_token_expired',items:[]});
+   let accessToken;try{accessToken=decrypt(tokens[0].encrypted_payload).access_token}catch{return res.json({ok:true,status:'oauth_token_unreadable',items:[]})}
+   if(!accessToken)return res.json({ok:true,status:'oauth_token_unavailable',items:[]});
+   const shuffled=terms.map(x=>({x,r:Math.random()})).sort((a,b)=>a.r-b.r).map(x=>x.x);
+   const items=[];const statuses=[];
+   for(const term of shuffled){
+    try{
+     const url='https://api.mercadolibre.com/sites/MLB/search?'+new URLSearchParams({q:term,limit:'10'});
+     const response=await fetch(url,{headers:{Authorization:'Bearer '+accessToken,Accept:'application/json','User-Agent':'FoxCore-Random10-Diagnostic/1.0'},redirect:'manual',signal:AbortSignal.timeout(6500)});
+     if(!response.ok){statuses.push(response.status);if([401,403,429].includes(response.status))break;continue}
+     const data=await response.json();
+     const options=(Array.isArray(data.results)?data.results:[]).filter(x=>/^MLB[0-9]{7,15}$/.test(String(x.id||''))&&typeof x.price==='number'&&x.price>0);
+     if(options.length){const x=options[Math.floor(Math.random()*options.length)];items.push({product_code:x.id,title:String(x.title||'').slice(0,180),price:x.price,currency:x.currency_id||'BRL',product_url:typeof x.permalink==='string'&&x.permalink.startsWith('https://')?x.permalink:null,search_term:term})}
+    }catch{statuses.push('network_error')}
+   }
+   return res.json({ok:true,status:items.length?'products_found':statuses.includes(401)?'oauth_unauthorized':statuses.includes(403)?'oauth_forbidden':statuses.includes(429)?'rate_limited':'no_products_available',items,requested:10,found:items.length,prices_from_search_api:true,discounts_verified:false,affiliate_links_generated:0,published:false});
+  }
   if(action==='meli_top10'&&req.method==='GET'){
    const cats={eletronicos:'MLB1000',celulares:'MLB1055',casa:'MLB1574',informatica:'MLB1648'};
    const category=String(req.query?.category||'celulares');
