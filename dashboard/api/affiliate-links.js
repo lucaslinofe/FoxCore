@@ -59,22 +59,33 @@ module.exports=async function(req,res){
    const state=events.find(x=>x.type==='status_update')?.status_update?.agent_status||'unknown';
    const output=events.find(x=>x.type==='structured_output_result')?.structured_output_result;
    if(output?.success&&jobs[0].status==='pending_manus'){
-    const v=output.value||{},raw=String(v.product_url||'');
-    let u;try{u=new URL(raw)}catch{}
+    const v=output.value||{},raw=String(v.product_url||'').trim();
+    // Manus can wrap URLs as Markdown links with image/favicons; never trust the wrapper.
+    const markdown=raw.match(/\]\((https:\/\/[^\s)]+)\)/);
+    const candidate=markdown?markdown[1]:raw;
+    let u;try{u=new URL(candidate)}catch{}
     const allowed=u&&u.protocol==='https:'&&!u.port&&!u.username&&!u.password&&['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase());
     const catalog=allowed?u.pathname.match(/\/p\/(MLB\d{7,15})(?:\/|$)/i):null;
     const item=allowed&&!catalog?u.pathname.match(/(?:\/|^)(MLB-?\d{7,15})(?:\/|$)/i):null;
-    const wid=allowed?String(u.searchParams.get('wid')||new URLSearchParams(u.hash.slice(1)).get('wid')||'').match(/^MLB\d{7,15}$/i):null;
-    const listingId=wid?wid[0].toUpperCase():item?'MLB'+item[1].replace(/\D/g,''):null;
+    const idPattern=/^MLB\d{7,15}$/i;
+    const observedWid=allowed?String(u.searchParams.get('wid')||new URLSearchParams(u.hash.slice(1)).get('wid')||''):''; 
+    const claimedListing=String(v.listing_id||'').trim();
+    const claimedCatalog=String(v.catalog_id||'').trim();
+    const evidenceText=String(v.evidence||'');
+    // A reported wid is preliminary evidence, not proof that an item page was opened.
+    const listingId=idPattern.test(observedWid)?observedWid.toUpperCase():
+      idPattern.test(claimedListing)&&evidenceText.includes(claimedListing)?claimedListing.toUpperCase():
+      item?'MLB'+item[1].replace(/\D/g,''):null;
     const catalogId=catalog?catalog[1].toUpperCase():null;
+    const catalogConflict=idPattern.test(claimedCatalog)&&catalogId&&claimedCatalog.toUpperCase()!==catalogId;
     const evidence=String(v.evidence||'').slice(0,1700);
-    if(!v.blocked&&allowed&&(catalogId||listingId)&&evidence.length>=10){
-     const note=evidence+' | Tipo: '+(catalogId?'catalogo':'anuncio')+(catalogId?' | catalog_id='+catalogId:'')+(listingId?' | listing_id_indicado='+listingId:'')+' | Link de afiliado nao verificado.';
-     await db('fox_manus_jobs','PATCH',{status:'pending_review',product_id:listingId||catalogId,product_url:u.origin+u.pathname,product_title:String(v.product_title||'').slice(0,250),evidence:note.slice(0,2000),updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus');
+    if(!v.blocked&&allowed&&!catalogConflict&&(catalogId||listingId)&&evidence.length>=10){
+     const note=evidence+' | Origem do identificador: '+(observedWid?'URL observada':'relato Manus; sem verificacao direta')+' | Tipo: '+(catalogId?'catalogo':'anuncio')+(catalogId?' | catalog_id='+catalogId:'')+(listingId?' | listing_id_indicado='+listingId:'')+' | Link de afiliado nao verificado.';
+     await db('fox_manus_jobs','PATCH',{status:'pending_review',product_id:catalogId||listingId,product_url:u.origin+u.pathname,product_title:String(v.product_title||'').slice(0,250),evidence:note.slice(0,2000),updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus');
      return res.json({ok:true,status:'pending_review',identification_type:catalogId?'catalog':'listing',catalog_id:catalogId,listing_id:listingId,listing_verified:false,affiliate_verified:false,product_url:u.origin+u.pathname,product_title:String(v.product_title||'').slice(0,250)});
     }
     await db('fox_manus_jobs','PATCH',{manus_error:v.blocked?'provider_blocked':'product_not_verified',product_title:String(v.product_title||'').slice(0,250),evidence:evidence||null,updated_at:new Date().toISOString()},'?id=eq.'+id);
-    return res.json({ok:true,status:'requires_manual_review',reason:v.blocked?'provider_blocked':'product_not_verified'});
+    return res.json({ok:true,status:'requires_manual_review',reason:v.blocked?'provider_blocked':catalogConflict?'catalog_id_conflict':'product_not_verified'});
    }
    return res.json({ok:true,status:state,task_id:taskId,has_structured_result:!!output});
   }
