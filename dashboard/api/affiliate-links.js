@@ -99,6 +99,40 @@ module.exports=async function(req,res){
    if(!rows.length)return res.status(409).json({ok:false,reason:'job_not_pending'});
    return res.json({ok:true,job:rows[0]});
   }
+  if(action==='manus_verify_listing'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'');
+   if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&select=id,status,product_url,product_title,evidence');
+   if(jobs.length!==1)return res.status(404).json({ok:false,reason:'job_not_found'});
+   const job=jobs[0];
+   if(job.status!=='pending_review'||!/\/p\/MLB\d{7,15}/i.test(job.product_url||''))return res.status(409).json({ok:false,reason:'catalog_review_required'});
+   const candidates=[...String(job.evidence||'').matchAll(/(?:listing_id_indicado\s*=\s*|\bwid\s*=\s*)(MLB\d{7,15})/gi)].map(x=>x[1].toUpperCase());
+   const codes=[...new Set(candidates)];
+   if(codes.length!==1)return res.json({ok:true,status:'listing_id_missing_or_ambiguous',verified:false});
+   const code=codes[0];
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   let accessToken=null;
+   if(tokens[0]&&Date.parse(tokens[0].expires_at)>Date.now()+60000){try{accessToken=decrypt(tokens[0].encrypted_payload).access_token||null}catch{}}
+   let response,item;
+   try{
+    response=await fetch('https://api.mercadolibre.com/items/'+code,{headers:{Accept:'application/json',...(accessToken?{Authorization:'Bearer '+accessToken}:{})},redirect:'manual',signal:AbortSignal.timeout(10000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===403?'provider_forbidden':response.status===401?'provider_unauthorized':response.status===404?'listing_not_found':response.status===429?'rate_limited':'provider_unavailable',http_status:response.status,listing_id:code,verified:false});
+    item=await response.json();
+   }catch{return res.json({ok:true,status:'provider_network_error',listing_id:code,verified:false})}
+   if(String(item.id||'').toUpperCase()!==code)return res.json({ok:true,status:'listing_id_mismatch',verified:false});
+   const words=t=>new Set(String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().match(/[a-z0-9]+/g)?.filter(w=>w.length>2&&!['para','com','sabor','produto'].includes(w))||[]);
+   const source=words(job.product_title),target=words(item.title);
+   const overlap=[...source].filter(w=>target.has(w)).length;
+   const similarity=source.size&&target.size?2*overlap/(source.size+target.size):0;
+   const permalink=String(item.permalink||'');
+   let url;try{url=new URL(permalink)}catch{}
+   const safe=url&&url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(url.hostname.toLowerCase());
+   if(similarity<0.65||!safe)return res.json({ok:true,status:'listing_requires_manual_comparison',listing_id:code,similarity:Math.round(similarity*100),verified:false});
+   const evidence=(String(job.evidence||'')+' | API oficial Mercado Livre /items/'+code+' retornou ID correspondente, titulo '+String(item.title||'').slice(0,160)+'; similaridade de titulo '+Math.round(similarity*100)+'%. Anuncio identificado; link de afiliado ainda nao verificado.').slice(0,2000);
+   const updated=await db('fox_manus_jobs','PATCH',{product_id:code,product_url:url.origin+url.pathname,evidence,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_review&product_url=eq.'+encodeURIComponent(job.product_url));
+   if(!updated.length)return res.status(409).json({ok:false,reason:'review_changed'});
+   return res.json({ok:true,status:'listing_verified_pending_approval',listing_id:code,product_url:url.origin+url.pathname,similarity:Math.round(similarity*100),verified:true,affiliate_verified:false});
+  }
   if(action==='manus_approve'&&req.method==='POST'){
    const id=String(req.body?.job_id||'');
    if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
