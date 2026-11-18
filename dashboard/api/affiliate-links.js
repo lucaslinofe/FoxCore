@@ -5,6 +5,35 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   const action=String(req.query?.action||req.body?.action||'');
+  // Manus integration staging: authenticated operator endpoints, no external calls.
+  if(action==='manus_jobs'&&req.method==='GET'){
+   const rows=await db('fox_manus_jobs','GET',null,'?select=id,offer_id,storefront_url,status,product_id,product_url,product_title,evidence,affiliate_url,affiliate_verified,created_at&order=created_at.desc&limit=100');
+   return res.json({ok:true,jobs:rows,manus_connected:false,conversion_connected:false});
+  }
+  if(action==='manus_enqueue'&&req.method==='POST'){
+   const offer_id=String(req.body?.offer_id||'').trim(),raw=String(req.body?.storefront_url||'').trim();
+   let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_storefront_url'})}
+   if(!offer_id||offer_id.length>120||raw.length>2048||u.protocol!=='https:'||u.port||u.username||u.password||!['meli.la','www.meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase()))return res.status(400).json({ok:false,reason:'invalid_job'});
+   const rows=await db('fox_manus_jobs','POST',{offer_id,storefront_url:u.href,status:'pending_manus'},'?on_conflict=offer_id,storefront_url');
+   return res.status(201).json({ok:true,job:rows[0]});
+  }
+  if(action==='manus_result'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'').trim(),raw=String(req.body?.product_url||'').trim(),evidence=String(req.body?.evidence||'').trim(),title=String(req.body?.product_title||'').trim();
+   if(!/^[0-9a-f-]{36}$/i.test(id)||evidence.length<10||evidence.length>2000||title.length>250)return res.status(400).json({ok:false,reason:'invalid_result'});
+   let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_product_url'})}
+   const match=u.pathname.match(/MLB-?(\\d{7,15})/i);
+   if(!match||u.protocol!=='https:'||u.port||u.username||u.password||!['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase()))return res.status(400).json({ok:false,reason:'invalid_product_url'});
+   const rows=await db('fox_manus_jobs','PATCH',{status:'pending_review',product_id:'MLB'+match[1],product_url:u.origin+u.pathname,product_title:title,evidence,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus');
+   if(!rows.length)return res.status(409).json({ok:false,reason:'job_not_pending'});
+   return res.json({ok:true,job:rows[0]});
+  }
+  if(action==='manus_approve'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'');
+   if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const rows=await db('fox_manus_jobs','PATCH',{status:'pending_conversion',updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_review');
+   if(!rows.length)return res.status(409).json({ok:false,reason:'job_not_in_review'});
+   return res.json({ok:true,job:rows[0]});
+  }
   if(action==='shopee_status'&&req.method==='GET'){
    try{
     const rows=await db('fox_oauth_tokens','GET',null,'?provider=eq.shopee&select=provider&limit=1');
