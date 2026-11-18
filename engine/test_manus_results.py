@@ -16,7 +16,7 @@ class FakeSession:
         if url.endswith("task.detail"):
             return FakeResponse({"ok":True,"task":{"id":"task1","status":self.state,
               "has_running_background_jobs":False}})
-        return FakeResponse({"ok":True,"data":[{
+        return FakeResponse({"ok":True,"messages":[{
             "type":"structured_output_result",
             "structured_output_result":{"success":True,"value":{
                 "status":"resolved","product_url":URL,"catalog_id":"MLB12345678",
