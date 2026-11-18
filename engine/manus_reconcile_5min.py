@@ -5,10 +5,11 @@ from urllib.parse import urlsplit,parse_qs
 def reconcile(db):
  key=os.getenv("MANUS_API_KEY","")
  if not key:return {"status":"disabled_missing_key"}
- jobs=db("fox_manus_jobs",params={"select":"id,manus_task_id,status","status":"eq.pending_manus","manus_task_id":"not.is.null","order":"created_at.asc","limit":"3"})
+ jobs=db("fox_manus_jobs",params={"select":"id,manus_task_id,status","status":"eq.pending_manus","manus_task_id":"not.is.null","order":"updated_at.asc","limit":"3"})
  done=0
  for job in jobs:
   try:
+   db("fox_manus_jobs","PATCH",{"updated_at":datetime.now(timezone.utc).isoformat()},params={"id":"eq."+job["id"],"status":"eq.pending_manus"})
    r=requests.get("https://api.manus.ai/v2/task.listMessages",params={"task_id":job["manus_task_id"],"order":"desc","limit":"100"},headers={"x-manus-api-key":key},timeout=15)
    r.raise_for_status();data=r.json()
    if not data.get("ok"):continue
