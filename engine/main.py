@@ -163,10 +163,13 @@ def cycle():
     # External connectors require independently verified provider credentials.
     db("fox_runs","POST",{"module":"FoxGuard","status":"idle" if not s.get("mining_enabled") else "blocked","finished_at":datetime.now(timezone.utc).isoformat(),"details":{"authorized_sources":len(sources),"dry_run":s.get("dry_run",True),"reason":"Provider connectors not configured"}})
 def loop():
+    from manus_reconcile_5min import reconcile
     last_probe=0
     while True:
         try: cycle()
         except Exception as e: logging.warning("Cycle unavailable: %s",type(e).__name__)
+        try: logging.info("Manus 5min reconciliation: %s",reconcile(db))
+        except Exception as e: logging.warning("Manus reconciliation unavailable: %s",type(e).__name__)
         if time.monotonic()-last_probe>=8*3600:
             last_probe=time.monotonic()
             try: pechinchou_diagnostic()
