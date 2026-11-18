@@ -38,6 +38,8 @@ const head=node('div','',box,'section-head');const heading=node('div','',head);n
 const reload=node('button','Atualizar fila',head,'secondary');
 const note=node('div','Consultando fila...',box,'notice');
 const listing=node('div','',box,'manus-list');
+const handoff=node('div','',box,'manus-handoff');const handoffTitle=node('h3','Preparar links para o Linkbuilder',handoff);const handoffInfo=node('p','Copie os endereços e cole no gerador oficial do Mercado Livre. Etiqueta: raposacacadora. A geração do link de afiliado ainda é feita no site oficial.',handoff,'muted');const handoffActions=node('div','',handoff,'actions');const copyBatch=node('button','Copiar URLs da fila',handoffActions,'secondary');const openBuilder=node('a','Abrir Linkbuilder oficial',handoffActions,'manus-link');openBuilder.href='https://www.mercadolivre.com.br/afiliados/linkbuilder#hub';openBuilder.target='_blank';openBuilder.rel='noopener noreferrer';copyBatch.onclick=async()=>{try{const response=await fetch('/api/affiliate-links?action=linkbuilder_queue',{headers:{Authorization:'Bearer '+key},cache:'no-store'});const data=await response.json();if(!response.ok||!data.ok)throw Error(data.reason||'Falha na fila');if(!data.urls.length){note.textContent='Nenhum produto aguardando conversão.';return}await navigator.clipboard.writeText(data.urls.join('\\n'));note.textContent=data.urls.length+' URL(s) copiadas para o Linkbuilder.'}catch(e){note.textContent='Não foi possível copiar: '+e.message}};
+
 const request=async(action,job_id)=>{const r=await fetch('/api/affiliate-links?action='+action,{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({job_id})});const v=await r.json();if(!r.ok||!v.ok)throw Error(v.reason||'Falha na operação');return v};
 const refresh=async()=>{try{
  const r=await fetch('/api/affiliate-links?action=manus_jobs',{headers:{Authorization:'Bearer '+key},cache:'no-store'});const v=await r.json();if(!r.ok||!v.ok)throw Error(v.reason||'Fila indisponível');
@@ -63,13 +65,13 @@ const refresh=async()=>{try{
   addLink('Abrir tarefa Manus',j.manus_task_url);
   if(j.evidence){const evidence=node('details','',card,'manus-evidence');node('summary','Ver evidências da identificação',evidence);node('p',j.evidence,evidence,'muted')}
   const actions=node('div','',card,'actions');
-  const add=(label,action)=>{const b=node('button',label,actions,'secondary');b.onclick=async()=>{b.disabled=true;try{const result=await request(action,j.id);await refresh();note.textContent=action==='manus_retry'?'Nova tentativa preparada. Clique em Enviar ao Manus para iniciar uma tarefa paga.':action==='manus_dispatch'?'Tarefa enviada ao Manus: '+result.manus_task_id:action==='manus_poll'?'Consulta realizada: '+result.status:action==='manus_verify_listing'?(result.verified?'Anúncio confirmado pela API. Revise e aprove o produto.':'Verificação: '+result.status+(result.http_status?' (HTTP '+result.http_status+')':'')):'Produto encaminhado para conversão.'}catch(e){note.textContent='Erro: '+e.message}finally{b.disabled=false}}};
+  const add=(label,action)=>{const b=node('button',label,actions,'secondary');b.onclick=async()=>{b.disabled=true;try{const result=await request(action,j.id);await refresh();note.textContent=action==='manus_retry'?'Nova tentativa preparada. Clique em Enviar ao Manus para iniciar uma tarefa paga.':action==='manus_dispatch'?'Tarefa enviada ao Manus: '+result.manus_task_id:action==='manus_poll'?'Consulta realizada: '+result.status:action==='manus_to_linkbuilder'?'Produto adicionado à fila do Linkbuilder.':'Produto encaminhado para conversão.'}catch(e){note.textContent='Erro: '+e.message}finally{b.disabled=false}}};
   if(j.status==='pending_manus'&&!j.manus_task_id)add('Enviar ao Manus','manus_dispatch');
   if(j.manus_task_id&&j.status==='pending_manus')add('Consultar resultado','manus_poll');
   if(j.manus_task_id&&j.manus_error&&j.status==='pending_manus')add('Preparar nova tentativa','manus_retry');
-  if(j.status==='pending_review'&&isCatalog)add('Verificar anúncio na API','manus_verify_listing');
-  if(j.status==='pending_review'&&!isCatalog)add('Aprovar produto','manus_approve');
-  if(j.status==='pending_review'&&isCatalog)node('p','Catálogo identificado. É necessário confirmar o anúncio individual antes da aprovação.',card,'manus-warning');
+  if(j.status==='pending_review')add('Enviar para fila Linkbuilder','manus_to_linkbuilder');
+  
+  if(j.status==='pending_review'&&isCatalog)node('p','Catálogo identificado pelo Manus. A conversão pode ser preparada sem validação da API.',card,'muted');
  }
 }catch(e){note.textContent='Erro: '+e.message}};
 reload.onclick=refresh;refresh();
