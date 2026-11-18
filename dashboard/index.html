@@ -71,6 +71,12 @@ const refresh=async()=>{try{
   if(j.manus_task_id&&j.status==='pending_manus')add('Consultar resultado','manus_poll');
   if(j.manus_task_id&&j.manus_error&&j.status==='pending_manus')add('Preparar nova tentativa','manus_retry');
   if(j.status==='pending_review')add('Enviar para fila Linkbuilder','manus_to_linkbuilder');
+  if(j.status==='pending_conversion'&&j.product_url){
+   const copyOne=node('button','Copiar URL deste produto',actions,'secondary');
+   copyOne.onclick=async()=>{try{await navigator.clipboard.writeText(j.product_url);note.textContent='URL do produto copiada. Cole no Linkbuilder oficial; o link de afiliado ainda não foi gerado.'}catch(e){note.textContent='Falha ao copiar: '+e.message}};
+   const builderOne=node('a','Abrir Linkbuilder',actions,'manus-link');builderOne.href='https://www.mercadolivre.com.br/afiliados/linkbuilder#hub';builderOne.target='_blank';builderOne.rel='noopener noreferrer';
+   if(isCatalog)node('p','A URL é de catálogo. O anúncio individual indicado pelo Manus não foi verificado; confirme o destino no Linkbuilder antes de usar.',card,'muted');
+  }
   
   if(j.status==='pending_review'&&isCatalog)node('p','Catálogo identificado pelo Manus. A conversão pode ser preparada sem validação da API.',card,'muted');
  }
