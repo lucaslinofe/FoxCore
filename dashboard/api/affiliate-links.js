@@ -34,6 +34,20 @@ module.exports=async function(req,res){
     return res.json({ok:true,status:'oauth_refreshed',expires_at});
    }catch{return res.json({ok:true,status:'refresh_network_or_storage_error'})}
   }
+  if(action==='meli_item_probe'&&req.method==='GET'){
+   const code=String(req.query?.code||'');
+   if(!/^MLB[0-9]{7,15}$/.test(code))return res.status(400).json({ok:false,reason:'invalid_product_code'});
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   let accessToken=null;
+   if(tokens[0]&&Date.parse(tokens[0].expires_at)>Date.now()+60000){try{accessToken=decrypt(tokens[0].encrypted_payload).access_token||null}catch{}}
+   try{
+    const response=await fetch('https://api.mercadolibre.com/items/'+code,{headers:{Accept:'application/json',...(accessToken?{Authorization:'Bearer '+accessToken}:{})},redirect:'manual',signal:AbortSignal.timeout(9000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===401?'item_unauthorized':response.status===403?'item_forbidden':response.status===404?'item_not_found':response.status===429?'rate_limited':'item_unavailable',http_status:response.status,product_code:code,oauth_used:!!accessToken,verified:false});
+    const item=await response.json();
+    if(item.id!==code)return res.json({ok:true,status:'item_id_mismatch',verified:false});
+    return res.json({ok:true,status:'item_accessible',product_code:code,title:String(item.title||'').slice(0,200),price:typeof item.price==='number'?item.price:null,currency:item.currency_id||null,availability:item.status||null,product_url:typeof item.permalink==='string'&&item.permalink.startsWith('https://')?item.permalink:null,oauth_used:!!accessToken,verified:true,affiliate_link_generated:false,published:false});
+   }catch{return res.json({ok:true,status:'item_network_error',product_code:code,verified:false})}
+  }
   if(action==='meli_random10'&&req.method==='GET'){
    const terms=['fone bluetooth','cafeteira','parafusadeira','mochila','mouse sem fio','ventilador','panela','tenis esportivo','smartwatch','luminaria'];
    const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
