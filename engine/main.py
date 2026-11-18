@@ -9,6 +9,7 @@ from pechinchou_collect_probe import collect
 from multi_attribute_matcher import compare
 from mercadolivre_search import search_candidates
 from offer_attributes import extract
+from manus_dispatch import dispatch_offer
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -157,7 +158,33 @@ def pechinchou_diagnostic():
             "finished_at":datetime.now(timezone.utc).isoformat(),
             "details":{"reason":type(exc).__name__,"diagnostic_only":True}})
 
+def dispatch_manus_queue():
+    """Dispatch a bounded batch only when both authorization and adapter are enabled."""
+    if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
+        return
+    authorized=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true","limit":"100"})
+    if not any("pechinchou" in str(x).lower() for x in authorized):
+        logging.info("Manus queue disabled: Pechinchou authorization not recorded")
+        return
+    rows=db("fox_pechinchou_queue",params={
+        "select":"short_url,title,source_metadata,status",
+        "status":"eq.awaiting_product_identification",
+        "order":"short_url.asc","limit":"5"})
+    for offer in rows:
+        try:
+            result=dispatch_offer(offer)
+            state=result["status"]
+            db("fox_pechinchou_queue","PATCH",{
+                "last_match_status":"manus_"+state,
+                "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
+            },params={"short_url":"eq."+offer["short_url"],
+                       "status":"eq.awaiting_product_identification"})
+        except Exception as exc:
+            logging.warning("Manus dispatch failed: %s",type(exc).__name__)
+            # Leave pending for controlled retry; no product is published.
+
 def cycle():
+    dispatch_manus_queue()
     s=settings()
     sources=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true"})
     # External connectors require independently verified provider credentials.
