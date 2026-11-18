@@ -179,5 +179,8 @@ class Health(BaseHTTPRequestHandler):
         body=json.dumps({"service":"foxcore-engine","configured":bool(BASE and KEY),"mode":"foundation","database_verified":verify_database()}).encode()
         self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers(); self.wfile.write(body)
 if __name__=="__main__":
+    if os.getenv("FOX_MANUS_AUTH_CHECK", "").lower() == "true":
+        from manus_auth_probe import probe
+        probe()
     Thread(target=loop,daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0",int(os.getenv("PORT","10000"))),Health).serve_forever()
