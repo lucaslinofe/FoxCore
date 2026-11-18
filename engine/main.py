@@ -167,11 +167,10 @@ def dispatch_manus_queue():
         logging.info("Manus queue disabled: Pechinchou authorization not recorded")
         return
     rows=db("fox_pechinchou_queue",params={
-        "select":"short_url,title,source_metadata,status",
+        "select":"short_url,title,source_metadata,status,last_match_status",
         "status":"eq.awaiting_product_identification",
-        "last_match_status":"not.like.manus_submitted%",
-        "order":"short_url.asc","limit":"5"})
-    for offer in rows:
+        "order":"short_url.asc","limit":"100"})
+    for offer in [r for r in rows if not str(r.get("last_match_status") or "").startswith("manus_submitted:")][:5]:
         try:
             request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
             result=create_manus_task(offer, request_id)
