@@ -2,7 +2,7 @@
 'use strict';
 // FoxCore: diagnóstico manual e somente leitura. Requer Playwright instalado no executor.
 // Não contorna CAPTCHA, não gera afiliados e não publica.
-const {chromium}=require('playwright');
+
 const SOURCE=new Set(['pechinchou.com.br','www.pechinchou.com.br']);
 const SHORT=new Set(['meli.la','www.meli.la']);
 const MARKET=new Set(['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br']);
@@ -15,6 +15,7 @@ function clean(u){const v=url(u.href);v.search='';v.hash='';return v.href}
 async function checked(page,destination,hosts,stage){const u=url(destination);if(!allowed(u,hosts))throw Error('unauthorized_destination_'+stage);const r=await page.goto(u.href,{waitUntil:'domcontentloaded',timeout:30000});const text=await page.locator('body').innerText({timeout:4000}).catch(()=>'');if(r?.status()===403||r?.status()===429||BLOCK.test(text))throw Error('access_blocked_'+stage);if(!allowed(url(page.url()),hosts))throw Error('unexpected_redirect_'+stage);return r}
 async function extractProduct(input){
  const source=url(input);if(!allowed(source,SOURCE)||!source.pathname.startsWith('/oferta/'))throw Error('invalid_offer_url');
+ const {chromium}=require('playwright');
  const browser=await chromium.launch({headless:true});
  try{
   const context=await browser.newContext({locale:'pt-BR'});
@@ -46,4 +47,4 @@ async function extractProduct(input){
  }finally{await browser.close()}
 }
 if(require.main===module){extractProduct(process.argv[2]||'').then(x=>console.log(JSON.stringify(x,null,2))).catch(e=>{console.error(JSON.stringify({status:'error',reason:e.message}));process.exitCode=1})}
-module.exports={extractProduct};
+module.exports={extractProduct,url,allowed,code,product,clean};
