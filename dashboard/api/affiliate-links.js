@@ -5,6 +5,19 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   const action=String(req.query?.action||req.body?.action||'');
+  if(action==='meli_top10'&&req.method==='GET'){
+   const cats={eletronicos:'MLB1000',celulares:'MLB1055',casa:'MLB1574',informatica:'MLB1648'};
+   const category=String(req.query?.category||'celulares');
+   if(!Object.hasOwn(cats,category))return res.status(400).json({ok:false,reason:'invalid_category'});
+   try{
+    const response=await fetch('https://api.mercadolibre.com/highlights/MLB/category/'+cats[category],{headers:{Accept:'application/json','User-Agent':'FoxCore-Top10-Diagnostic/1.0'},redirect:'manual',signal:AbortSignal.timeout(9000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===403?'access_forbidden':response.status===429?'rate_limited':'provider_unavailable',http_status:response.status,category,items:[],verified:false,affiliate_links_generated:0});
+    const payload=await response.json();
+    const raw=Array.isArray(payload.content)?payload.content:Array.isArray(payload.results)?payload.results:[];
+    const ids=[...new Set(raw.map(x=>String(x.id||x.item_id||'')).filter(x=>/^MLB[0-9]{7,15}$/.test(x)))].slice(0,10);
+    return res.json({ok:true,status:ids.length?'ranking_ids_available':'ranking_empty_or_unrecognized',category,items:ids.map((id,index)=>({rank:index+1,product_code:id})),verified:false,prices_verified:false,affiliate_links_generated:0,source:'Mercado Livre highlights API'});
+   }catch{return res.json({ok:true,status:'network_unavailable',category,items:[],verified:false,affiliate_links_generated:0});}
+  }
   if(action==='mercadolivre_oauth_search_probe'&&req.method==='POST'){
    const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
    if(!tokens.length)return res.json({ok:true,status:'oauth_not_connected',products:0});
