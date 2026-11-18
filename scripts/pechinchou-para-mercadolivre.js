@@ -14,7 +14,7 @@ function product(u){return allowed(u,MARKET)&&!!code(u)}
 function clean(u){const v=url(u.href);v.search='';v.hash='';return v.href}
 async function checked(page,destination,hosts,stage){const u=url(destination);if(!allowed(u,hosts))throw Error('unauthorized_destination_'+stage);const r=await page.goto(u.href,{waitUntil:'domcontentloaded',timeout:30000});const text=await page.locator('body').innerText({timeout:4000}).catch(()=>'');if(r?.status()===403||r?.status()===429||BLOCK.test(text))throw Error('access_blocked_'+stage);if(!allowed(url(page.url()),hosts))throw Error('unexpected_redirect_'+stage);return r}
 async function extractProduct(input){
- const source=url(input);if(!allowed(source,SOURCE)||!source.pathname.startsWith('/oferta/'))throw Error('invalid_offer_url');
+ const source=url(String(input).trim().replace(/[\u200B-\u200D\u2060\uFEFF]/g,''));source.pathname=decodeURIComponent(source.pathname).replace(/[\u200B-\u200D\u2060\uFEFF]/g,'');if(!allowed(source,SOURCE)||!source.pathname.startsWith('/oferta/'))throw Error('invalid_offer_url');
  const {chromium}=require('playwright');
  const browser=await chromium.launch({headless:true});
  try{
@@ -28,7 +28,8 @@ async function extractProduct(input){
    const out=[];const walk=x=>{if(!x||typeof x!=='object')return;if(Array.isArray(x))return x.forEach(walk);if(x['@type']==='Offer'&&typeof x.url==='string')out.push(x.url);if(x.offers)walk(x.offers);if(x['@graph'])walk(x['@graph'])};
    for(const n of nodes){try{walk(JSON.parse(n.textContent||''))}catch{}}return out
   });
-  const candidates=links.map(x=>{try{return url(x,page.url())}catch{return null}}).filter(x=>x&&(allowed(x,SHORT)||product(x)));
+  const metadata=await page.locator('a[href]').evaluateAll(nodes=>nodes.filter(n=>/ir para (a )?(loja|oferta|produto)|ver (a )?oferta|comprar/i.test((n.innerText||'').trim())).map(n=>n.href));
+  const candidates=[...new Set([...links,...metadata].map(x=>{try{const u=url(x,page.url());return (allowed(u,SHORT)||product(u))?u.href:null}catch{return null}}).filter(Boolean))].map(x=>url(x));
   if(candidates.length!==1)return {status:'ambiguous_or_missing_source',count:candidates.length,offer_url:source.href};
   const target=candidates[0];
   if(product(target))return {status:'product_identified',offer_url:source.href,offer_title:title,product_id:code(target),product_url:clean(target),evidence:'json_ld_offer_url'};
