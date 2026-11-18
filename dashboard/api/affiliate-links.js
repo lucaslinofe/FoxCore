@@ -17,9 +17,15 @@ module.exports=async function(req,res){
    const cats={eletronicos:'MLB1000',celulares:'MLB1055',casa:'MLB1574',informatica:'MLB1648'};
    const category=String(req.query?.category||'celulares');
    if(!Object.hasOwn(cats,category))return res.status(400).json({ok:false,reason:'invalid_category'});
+   const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   if(!tokens.length)return res.json({ok:true,status:'oauth_not_connected',category,items:[],verified:false});
+   if(!tokens[0].expires_at||Date.parse(tokens[0].expires_at)<=Date.now()+60000)return res.json({ok:true,status:'oauth_token_expired',category,items:[],verified:false});
+   let accessToken;
+   try{accessToken=decrypt(tokens[0].encrypted_payload).access_token}catch{return res.json({ok:true,status:'oauth_token_unreadable',category,items:[],verified:false})}
+   if(!accessToken)return res.json({ok:true,status:'oauth_token_unavailable',category,items:[],verified:false});
    try{
-    const response=await fetch('https://api.mercadolibre.com/highlights/MLB/category/'+cats[category],{headers:{Accept:'application/json','User-Agent':'FoxCore-Top10-Diagnostic/1.0'},redirect:'manual',signal:AbortSignal.timeout(9000)});
-    if(!response.ok)return res.json({ok:true,status:response.status===403?'access_forbidden':response.status===429?'rate_limited':'provider_unavailable',http_status:response.status,category,items:[],verified:false,affiliate_links_generated:0});
+    const response=await fetch('https://api.mercadolibre.com/highlights/MLB/category/'+cats[category],{headers:{Authorization:'Bearer '+accessToken,Accept:'application/json','User-Agent':'FoxCore-Top10-Diagnostic/1.0'},redirect:'manual',signal:AbortSignal.timeout(9000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===401?'oauth_unauthorized':response.status===403?'oauth_forbidden':response.status===429?'rate_limited':'provider_unavailable',http_status:response.status,category,items:[],verified:false,affiliate_links_generated:0});
     const payload=await response.json();
     const raw=Array.isArray(payload.content)?payload.content:Array.isArray(payload.results)?payload.results:[];
     const ids=[...new Set(raw.map(x=>String(x.id||x.item_id||'')).filter(x=>/^MLB[0-9]{7,15}$/.test(x)))].slice(0,10);
