@@ -38,6 +38,8 @@ class QueueIntegrationTests(unittest.TestCase):
             if method=="PATCH":
                 writes.append(data)
                 return []
+            if table=="fox_sources":
+                return [{"name":"Pechinchou","authorized":True,"enabled":True}]
             return [{"short_url":OFFER["short_url"],"status":"awaiting_product_identification",
                      "last_match_status":"manus_submitted:task_123"}]
         result={"status":"resolved","product_url":"https://www.mercadolivre.com.br/p/MLB12345678",
@@ -51,8 +53,10 @@ class QueueIntegrationTests(unittest.TestCase):
 
     def test_pending_does_not_write(self):
         with patch.dict(os.environ,{"FOX_MANUS_ENABLED":"true"}), \
-             patch.object(main,"db",return_value=[{"short_url":OFFER["short_url"],
-                 "last_match_status":"manus_submitted:task_123"}]) as db, \
+             patch.object(main,"db",side_effect=lambda table,**kwargs: (
+                 [{"name":"Pechinchou","authorized":True,"enabled":True}]
+                 if table=="fox_sources" else [{"short_url":OFFER["short_url"],
+                 "last_match_status":"manus_submitted:task_123"}])) as db, \
              patch.object(main,"check_task",return_value={"status":"pending"}):
             main.reconcile_manus_queue()
         self.assertTrue(all(call.args[1]!="PATCH" if len(call.args)>1 else True
