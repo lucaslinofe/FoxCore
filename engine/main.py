@@ -169,6 +169,7 @@ def dispatch_manus_queue():
     rows=db("fox_pechinchou_queue",params={
         "select":"short_url,title,source_metadata,status",
         "status":"eq.awaiting_product_identification",
+        "last_match_status":"not.in.(manus_accepted,manus_resolved)",
         "order":"short_url.asc","limit":"5"})
     for offer in rows:
         try:
