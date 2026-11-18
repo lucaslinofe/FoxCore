@@ -9,7 +9,7 @@ from pechinchou_collect_probe import collect
 from multi_attribute_matcher import compare
 from mercadolivre_search import search_candidates
 from offer_attributes import extract
-from manus_dispatch import dispatch_offer
+from manus_api_v2 import create_manus_task
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -169,14 +169,15 @@ def dispatch_manus_queue():
     rows=db("fox_pechinchou_queue",params={
         "select":"short_url,title,source_metadata,status",
         "status":"eq.awaiting_product_identification",
-        "last_match_status":"not.in.(manus_accepted,manus_resolved)",
+        "last_match_status":"not.like.manus_submitted%",
         "order":"short_url.asc","limit":"5"})
     for offer in rows:
         try:
-            result=dispatch_offer(offer)
+            request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
+            result=create_manus_task(offer, request_id)
             state=result["status"]
             db("fox_pechinchou_queue","PATCH",{
-                "last_match_status":"manus_"+state,
+                "last_match_status":("manus_submitted:"+result["task_id"] if state=="accepted" else "manus_"+state),
                 "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
             },params={"short_url":"eq."+offer["short_url"],
                        "status":"eq.awaiting_product_identification"})
