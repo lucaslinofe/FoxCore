@@ -17,6 +17,24 @@ module.exports=async function(req,res){
    const rows=await db('fox_manus_jobs','POST',{offer_id,storefront_url:u.href,status:'pending_manus'},'?on_conflict=offer_id,storefront_url');
    return res.status(201).json({ok:true,job:rows[0]});
   }
+  if(action==='manus_dispatch'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'').trim();
+   if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   if(!process.env.MANUS_API_KEY)return res.status(503).json({ok:false,reason:'manus_key_missing'});
+   const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&select=id,storefront_url,status,manus_task_id');
+   if(jobs.length!==1)return res.status(404).json({ok:false,reason:'job_not_found'});
+   const job=jobs[0];
+   if(job.status!=='pending_manus'||job.manus_task_id)return res.status(409).json({ok:false,reason:'job_already_dispatched_or_processed'});
+   const prompt='Analise esta vitrine do Mercado Livre e identifique o produto específico apresentado: '+job.storefront_url+' . Responda em português com JSON contendo product_url, product_title, product_id, evidence. O product_url deve apontar diretamente para o anúncio individual no Mercado Livre. Não invente links ou IDs. Se o acesso estiver bloqueado ou o produto não for identificável, informe explicitamente o bloqueio, sem contornar CAPTCHA ou restrições.';
+   let response,data;
+   try{
+    response=await fetch('https://api.manus.ai/v2/task.create',{method:'POST',headers:{'Content-Type':'application/json','x-manus-api-key':process.env.MANUS_API_KEY},body:JSON.stringify({message:{content:prompt},title:'FoxCore - Identificação de produto',interactive_mode:false,share_visibility:'private'}),signal:AbortSignal.timeout(20000)});
+    data=await response.json();
+   }catch(_){return res.status(502).json({ok:false,reason:'manus_connection_failed'})}
+   if(!response.ok||!data?.ok||!data?.task_id)return res.status(502).json({ok:false,reason:'manus_task_rejected',http_status:response.status,provider_error_code:data?.error?.code||null});
+   const rows=await db('fox_manus_jobs','PATCH',{manus_task_id:data.task_id,manus_task_url:data.task_url||null,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus&manus_task_id=is.null');
+   return res.json({ok:true,job:rows[0]||null,manus_task_id:data.task_id,task_url:data.task_url||null});
+  }
   if(action==='manus_result'&&req.method==='POST'){
    const id=String(req.body?.job_id||'').trim(),raw=String(req.body?.product_url||'').trim(),evidence=String(req.body?.evidence||'').trim(),title=String(req.body?.product_title||'').trim();
    if(!/^[0-9a-f-]{36}$/i.test(id)||evidence.length<10||evidence.length>2000||title.length>250)return res.status(400).json({ok:false,reason:'invalid_result'});
