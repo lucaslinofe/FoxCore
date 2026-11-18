@@ -5,6 +5,14 @@ module.exports=async function(req,res){
  if(!authenticated(req))return res.status(401).json({ok:false});
  try{
   const action=String(req.query?.action||req.body?.action||'');
+  if(action==='shopee_status'&&req.method==='GET'){
+   try{
+    const rows=await db('fox_oauth_tokens','GET',null,'?provider=eq.shopee&select=provider&limit=1');
+    const configured=Boolean(process.env.SHOPEE_AFFILIATE_APP_ID&&process.env.SHOPEE_AFFILIATE_SECRET);
+    const connected=configured||rows.length>0;
+    return res.json({ok:true,connected,credential_source:configured?'Vercel':rows.length?'Supabase OAuth':null,queue_ready:false,api_verified:false});
+   }catch{return res.status(503).json({ok:false,reason:'status_unavailable'});}
+  }
   if(action==='meli_top10'&&req.method==='GET'){
    const cats={eletronicos:'MLB1000',celulares:'MLB1055',casa:'MLB1574',informatica:'MLB1648'};
    const category=String(req.query?.category||'celulares');
