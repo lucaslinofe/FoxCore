@@ -12,10 +12,6 @@
     {
       "path": "/api/check-prices",
       "schedule": "30 9 * * *"
-    },
-    {
-      "path": "/api/manus-automation",
-      "schedule": "*/5 * * * *"
     }
   ]
 }
