@@ -164,6 +164,9 @@ def reconcile_manus_queue():
     """Poll known Manus tasks and persist only validated product destinations."""
     if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
         return
+    authorized=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true","limit":"100"})
+    if not any("pechinchou" in str(x.get("name") or "").lower() for x in authorized):
+        return
     rows=db("fox_pechinchou_queue",params={
         "select":"short_url,last_match_status,status",
         "status":"eq.awaiting_product_identification","limit":"500"})
@@ -192,7 +195,7 @@ def dispatch_manus_queue():
     if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
         return
     authorized=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true","limit":"100"})
-    if not any("pechinchou" in str(x).lower() for x in authorized):
+    if not any("pechinchou" in str(x.get("name") or "").lower() for x in authorized):
         logging.info("Manus queue disabled: Pechinchou authorization not recorded")
         return
     rows=db("fox_pechinchou_queue",params={
