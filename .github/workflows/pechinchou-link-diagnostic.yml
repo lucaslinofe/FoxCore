@@ -6,6 +6,11 @@ on:
       - 'scripts/pechinchou-para-mercadolivre.test.js'
       - '.github/workflows/pechinchou-link-diagnostic.yml'
   workflow_dispatch:
+    inputs:
+      offer_url:
+        description: 'URL pública de oferta do Pechinchou para teste manual'
+        required: true
+        type: string
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -18,3 +23,30 @@ jobs:
           node-version: '22'
       - run: node --check scripts/pechinchou-para-mercadolivre.js
       - run: node --test scripts/pechinchou-para-mercadolivre.test.js
+  browser-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Diagnóstico de uma oferta sem publicação
+        env:
+          OFFER_URL: ${{ inputs.offer_url }}
+        run: |
+          node scripts/pechinchou-para-mercadolivre.js "$OFFER_URL" > diagnostic-result.json 2> diagnostic-error.log || true
+          cat diagnostic-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: foxcore-pechinchou-diagnostic
+          path: |
+            diagnostic-result.json
+            diagnostic-error.log
+          retention-days: 3
