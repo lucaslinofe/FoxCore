@@ -63,10 +63,11 @@ const refresh=async()=>{try{
   addLink('Abrir tarefa Manus',j.manus_task_url);
   if(j.evidence){const evidence=node('details','',card,'manus-evidence');node('summary','Ver evidências da identificação',evidence);node('p',j.evidence,evidence,'muted')}
   const actions=node('div','',card,'actions');
-  const add=(label,action)=>{const b=node('button',label,actions,'secondary');b.onclick=async()=>{b.disabled=true;try{const result=await request(action,j.id);await refresh();note.textContent=action==='manus_retry'?'Nova tentativa preparada. Clique em Enviar ao Manus para iniciar uma tarefa paga.':action==='manus_dispatch'?'Tarefa enviada ao Manus: '+result.manus_task_id:action==='manus_poll'?'Consulta realizada: '+result.status:'Produto encaminhado para conversão.'}catch(e){note.textContent='Erro: '+e.message}finally{b.disabled=false}}};
+  const add=(label,action)=>{const b=node('button',label,actions,'secondary');b.onclick=async()=>{b.disabled=true;try{const result=await request(action,j.id);await refresh();note.textContent=action==='manus_retry'?'Nova tentativa preparada. Clique em Enviar ao Manus para iniciar uma tarefa paga.':action==='manus_dispatch'?'Tarefa enviada ao Manus: '+result.manus_task_id:action==='manus_poll'?'Consulta realizada: '+result.status:action==='manus_verify_listing'?(result.verified?'Anúncio confirmado pela API. Revise e aprove o produto.':'Verificação: '+result.status+(result.http_status?' (HTTP '+result.http_status+')':'')):'Produto encaminhado para conversão.'}catch(e){note.textContent='Erro: '+e.message}finally{b.disabled=false}}};
   if(j.status==='pending_manus'&&!j.manus_task_id)add('Enviar ao Manus','manus_dispatch');
   if(j.manus_task_id&&j.status==='pending_manus')add('Consultar resultado','manus_poll');
   if(j.manus_task_id&&j.manus_error&&j.status==='pending_manus')add('Preparar nova tentativa','manus_retry');
+  if(j.status==='pending_review'&&isCatalog)add('Verificar anúncio na API','manus_verify_listing');
   if(j.status==='pending_review'&&!isCatalog)add('Aprovar produto','manus_approve');
   if(j.status==='pending_review'&&isCatalog)node('p','Catálogo identificado. É necessário confirmar o anúncio individual antes da aprovação.',card,'manus-warning');
  }
