@@ -11,7 +11,7 @@ module.exports=async function(req,res){
   if(!r.ok)return res.json({ok:true,status:r.status===403?'access_forbidden':r.status===429?'rate_limited':'provider_unavailable',http_status:r.status,category,items:[],verified:false,affiliate_links_generated:0});
   const payload=await r.json();
   const raw=Array.isArray(payload.content)?payload.content:Array.isArray(payload.results)?payload.results:[];
-  const ids=[...new Set(raw.map(x=>String(x.id||x.item_id||'')).filter(x=>/^MLB\\d{7,15}$/.test(x)))].slice(0,10);
+  const ids=[...new Set(raw.map(x=>String(x.id||x.item_id||'')).filter(x=>/^MLB[0-9]{7,15}$/.test(x)))].slice(0,10);
   return res.json({ok:true,status:ids.length?'ranking_ids_available':'ranking_empty_or_unrecognized',category,items:ids.map((id,index)=>({rank:index+1,product_code:id})),verified:false,prices_verified:false,affiliate_links_generated:0,source:'Mercado Livre highlights API',note:'Ranking da categoria; preços e disponibilidade exigem validação adicional.'});
  }catch{return res.json({ok:true,status:'network_unavailable',category,items:[],verified:false,affiliate_links_generated:0});}
 };
