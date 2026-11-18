@@ -13,6 +13,27 @@ module.exports=async function(req,res){
     return res.json({ok:true,connected,credential_source:configured?'Vercel':rows.length?'Supabase OAuth':null,queue_ready:false,api_verified:false});
    }catch{return res.status(503).json({ok:false,reason:'status_unavailable'});}
   }
+  if(action==='mercadolivre_refresh_token'&&req.method==='POST'){
+   const rows=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
+   if(!rows.length)return res.json({ok:true,status:'oauth_not_connected'});
+   let old;try{old=decrypt(rows[0].encrypted_payload)}catch{return res.json({ok:true,status:'oauth_token_unreadable'})}
+   if(!old.refresh_token)return res.json({ok:true,status:'refresh_token_missing'});
+   if(!process.env.MELI_AFFILIATE_CLIENT_ID||!process.env.MELI_AFFILIATE_CLIENT_SECRET)return res.json({ok:true,status:'oauth_client_not_configured'});
+   try{
+    const response=await fetch('https://api.mercadolibre.com/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:process.env.MELI_AFFILIATE_CLIENT_ID,client_secret:process.env.MELI_AFFILIATE_CLIENT_SECRET,refresh_token:old.refresh_token}),signal:AbortSignal.timeout(12000)});
+    if(!response.ok)return res.json({ok:true,status:response.status===400||response.status===401?'reauthorization_required':'refresh_provider_error',http_status:response.status});
+    const fresh=await response.json();
+    if(!fresh.access_token||!fresh.refresh_token||!Number.isFinite(Number(fresh.expires_in))||Number(fresh.expires_in)<=0)return res.json({ok:true,status:'invalid_refresh_response'});
+    const crypto=require('node:crypto');const key=Buffer.from(process.env.MELI_OAUTH_ENCRYPTION_KEY||'','base64');
+    if(key.length!==32)return res.json({ok:true,status:'encryption_key_unavailable'});
+    const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+    const ciphertext=Buffer.concat([cipher.update(JSON.stringify(fresh),'utf8'),cipher.final()]);
+    const encrypted_payload=Buffer.concat([iv,cipher.getAuthTag(),ciphertext]).toString('base64');
+    const expires_at=new Date(Date.now()+Number(fresh.expires_in)*1000).toISOString();
+    await db('fox_oauth_tokens','POST',{provider:'mercado_livre',encrypted_payload,expires_at,updated_at:new Date().toISOString()},'?on_conflict=provider');
+    return res.json({ok:true,status:'oauth_refreshed',expires_at});
+   }catch{return res.json({ok:true,status:'refresh_network_or_storage_error'})}
+  }
   if(action==='meli_random10'&&req.method==='GET'){
    const terms=['fone bluetooth','cafeteira','parafusadeira','mochila','mouse sem fio','ventilador','panela','tenis esportivo','smartwatch','luminaria'];
    const tokens=await db('fox_oauth_tokens','GET',null,'?provider=eq.mercado_livre&select=encrypted_payload,expires_at&limit=1');
