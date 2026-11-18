@@ -29,7 +29,7 @@ def check_task(task_id, request_id, session=None):
     events=messages.get("messages") or []
     if not isinstance(events,list): raise ValueError("Invalid Manus events")
     # Request newest events first: the structured output is emitted after completion.
-    for event in reversed(events):
+    for event in events:
         if not isinstance(event,dict) or event.get("type")!="structured_output_result":
             continue
         output=event.get("structured_output_result") or {}
