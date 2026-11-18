@@ -1,0 +1,38 @@
+name: Diagnóstico Pechinchou (Playwright)
+on:
+  workflow_dispatch:
+    inputs:
+      vitrine:
+        description: URL da vitrine social Mercado Livre
+        required: true
+        default: https://www.mercadolivre.com.br/social/pp20250311151339
+  push:
+    paths:
+      - '.github/workflows/diagnostico-pechinchou.yml'
+jobs:
+  recuperar-link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar navegador
+        run: |
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Testar vitrine
+        env:
+          VITRINE: ${{ inputs.vitrine || 'https://www.mercadolivre.com.br/social/pp20250311151339' }}
+        run: |
+          node scripts/extrair-produto.js "$VITRINE" | tee resultado-pechinchou.json
+      - name: Salvar diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-pechinchou
+          path: resultado-pechinchou.json
+          if-no-files-found: ignore
