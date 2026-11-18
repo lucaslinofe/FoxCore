@@ -7,8 +7,8 @@ module.exports=async function(req,res){
   const action=String(req.query?.action||req.body?.action||'');
   // Manus integration staging: authenticated operator endpoints, no external calls.
   if(action==='manus_jobs'&&req.method==='GET'){
-   const rows=await db('fox_manus_jobs','GET',null,'?select=id,offer_id,storefront_url,status,product_id,product_url,product_title,evidence,affiliate_url,affiliate_verified,created_at&order=created_at.desc&limit=100');
-   return res.json({ok:true,jobs:rows,manus_connected:false,conversion_connected:false});
+   const rows=await db('fox_manus_jobs','GET',null,'?select=id,offer_id,storefront_url,status,product_id,product_url,product_title,evidence,affiliate_url,affiliate_verified,manus_task_id,manus_task_url,manus_error,created_at&order=created_at.desc&limit=100');
+   return res.json({ok:true,jobs:rows,manus_connected:Boolean(process.env.MANUS_API_KEY),conversion_connected:false});
   }
   if(action==='manus_enqueue'&&req.method==='POST'){
    const offer_id=String(req.body?.offer_id||'').trim(),raw=String(req.body?.storefront_url||'').trim();
@@ -28,12 +28,37 @@ module.exports=async function(req,res){
    const prompt='Analise esta vitrine do Mercado Livre e identifique o produto específico apresentado: '+job.storefront_url+' . Responda em português com JSON contendo product_url, product_title, product_id, evidence. O product_url deve apontar diretamente para o anúncio individual no Mercado Livre. Não invente links ou IDs. Se o acesso estiver bloqueado ou o produto não for identificável, informe explicitamente o bloqueio, sem contornar CAPTCHA ou restrições.';
    let response,data;
    try{
-    response=await fetch('https://api.manus.ai/v2/task.create',{method:'POST',headers:{'Content-Type':'application/json','x-manus-api-key':process.env.MANUS_API_KEY},body:JSON.stringify({message:{content:prompt},title:'FoxCore - Identificação de produto',interactive_mode:false,share_visibility:'private'}),signal:AbortSignal.timeout(20000)});
+    response=await fetch('https://api.manus.ai/v2/task.create',{method:'POST',headers:{'Content-Type':'application/json','x-manus-api-key':process.env.MANUS_API_KEY},body:JSON.stringify({message:{content:[{type:'text',text:prompt,visibility:'visible'}]},title:'FoxCore - Identificação de produto',agent_profile:'lite',interactive_mode:false,share_visibility:'private',clear_connectors:true,structured_output_schema:{type:'object',properties:{product_url:{type:'string'},product_title:{type:'string'},product_id:{type:'string'},evidence:{type:'string'},blocked:{type:'boolean'}},required:['product_url','product_title','product_id','evidence','blocked'],additionalProperties:false}}),signal:AbortSignal.timeout(20000)});
     data=await response.json();
    }catch(_){return res.status(502).json({ok:false,reason:'manus_connection_failed'})}
    if(!response.ok||!data?.ok||!data?.task_id)return res.status(502).json({ok:false,reason:'manus_task_rejected',http_status:response.status,provider_error_code:data?.error?.code||null});
    const rows=await db('fox_manus_jobs','PATCH',{manus_task_id:data.task_id,manus_task_url:data.task_url||null,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus&manus_task_id=is.null');
    return res.json({ok:true,job:rows[0]||null,manus_task_id:data.task_id,task_url:data.task_url||null});
+  }
+  if(action==='manus_poll'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'');
+   if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&select=id,status,manus_task_id');
+   if(jobs.length!==1||!jobs[0].manus_task_id)return res.status(404).json({ok:false,reason:'manus_task_not_found'});
+   const taskId=jobs[0].manus_task_id;
+   let response,result;
+   try{response=await fetch('https://api.manus.ai/v2/task.listMessages?task_id='+encodeURIComponent(taskId)+'&order=desc&limit=100',{headers:{'x-manus-api-key':process.env.MANUS_API_KEY},signal:AbortSignal.timeout(15000)});result=await response.json()}catch{return res.status(502).json({ok:false,reason:'manus_poll_failed'})}
+   if(!response.ok||!result?.ok)return res.status(502).json({ok:false,reason:'manus_poll_rejected',http_status:response.status});
+   const events=result.messages||[];
+   const state=events.find(x=>x.type==='status_update')?.status_update?.agent_status||'unknown';
+   const output=events.find(x=>x.type==='structured_output_result')?.structured_output_result;
+   if(output?.success&&jobs[0].status==='pending_manus'){
+    const v=output.value||{},raw=String(v.product_url||'');
+    let u;try{u=new URL(raw)}catch{}
+    const match=u?.pathname.match(/MLB-?(\d{7,15})/i);
+    if(!v.blocked&&match&&u.protocol==='https:'&&!u.port&&!u.username&&!u.password&&['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase())&&String(v.evidence||'').length>=10){
+     await db('fox_manus_jobs','PATCH',{status:'pending_review',product_id:'MLB'+match[1],product_url:u.origin+u.pathname,product_title:String(v.product_title||'').slice(0,250),evidence:String(v.evidence).slice(0,2000),updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus');
+     return res.json({ok:true,status:'pending_review',product_url:u.origin+u.pathname,product_title:String(v.product_title||'').slice(0,250)});
+    }
+    await db('fox_manus_jobs','PATCH',{manus_error:v.blocked?'provider_blocked':'product_not_verified',updated_at:new Date().toISOString()},'?id=eq.'+id);
+    return res.json({ok:true,status:'requires_manual_review',reason:v.blocked?'provider_blocked':'product_not_verified'});
+   }
+   return res.json({ok:true,status:state,task_id:taskId,has_structured_result:!!output});
   }
   if(action==='manus_result'&&req.method==='POST'){
    const id=String(req.body?.job_id||'').trim(),raw=String(req.body?.product_url||'').trim(),evidence=String(req.body?.evidence||'').trim(),title=String(req.body?.product_title||'').trim();
