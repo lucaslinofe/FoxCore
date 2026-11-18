@@ -25,9 +25,10 @@ def check_task(task_id, request_id, session=None):
     if status in ("error","deleted"): return {"status":"error","reason":"manus_"+status}
     if status!="stopped" or task.get("has_running_background_jobs"):
         return {"status":"pending"}
-    messages=_get("task.listMessages",task_id,session,order="asc",limit=100)
-    events=messages.get("data") or []
+    messages=_get("task.listMessages",task_id,session,order="desc",limit=100)
+    events=messages.get("messages") or []
     if not isinstance(events,list): raise ValueError("Invalid Manus events")
+    # Request newest events first: the structured output is emitted after completion.
     for event in reversed(events):
         if not isinstance(event,dict) or event.get("type")!="structured_output_result":
             continue
