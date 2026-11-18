@@ -23,7 +23,7 @@
  */
 'use strict';
 
-const { chromium } = require('playwright');
+
 
 const PECHINCHOU_HOSTS = new Set(['pechinchou.com.br', 'www.pechinchou.com.br']);
 const SHORTLINK_HOSTS = new Set(['meli.la', 'www.meli.la']);
@@ -185,6 +185,7 @@ async function extractProduct(pechinChouUrl, options = {}) {
     throw new Error('Informe uma URL HTTPS de oferta em pechinchou.com.br/oferta/.');
   }
 
+  const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: options.headless !== false });
   try {
     const context = await browser.newContext({ locale: 'pt-BR', viewport: { width: 1280, height: 900 } });
