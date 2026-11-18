@@ -33,6 +33,22 @@ def create_manus_task(offer, request_id, session=None):
         "hide_in_task_list": True,
         "title": "FOX product identification " + str(request_id)[:40],
     }
+    body["structured_output_schema"] = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["resolved", "needs_review", "not_found"]},
+            "product_url": {"type": ["string", "null"]},
+            "catalog_id": {"type": ["string", "null"]},
+            "listing_id": {"type": ["string", "null"]},
+            "evidence": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "type": {"type": "string"},
+                    "url": {"type": "string"}},
+                "required": ["type", "url"], "additionalProperties": False}}
+        },
+        "required": ["status", "product_url", "catalog_id", "listing_id", "evidence"],
+        "additionalProperties": False
+    }
     client = session or requests
     response = client.post(MANUS_CREATE_URL, json=body,
         headers={"x-manus-api-key": key, "Content-Type": "application/json"},
