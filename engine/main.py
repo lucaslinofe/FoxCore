@@ -44,7 +44,7 @@ def pechinchou_diagnostic():
         direct_evidence=0
         # Include historical queue entries, not just the current Pechinchou page.
         existing_rows=db("fox_pechinchou_queue",params={
-            "select":"short_url,title,extracted_attributes,candidate_matches,source_metadata","limit":"1000"})
+            "select":"short_url,title,extracted_attributes,candidate_matches,source_metadata,last_match_status","limit":"1000"})
         existing_by_url={row["short_url"]:row for row in existing_rows}
         current_by_url={o["short_url"]:o for o in offers if o.get("short_url","").startswith("https://meli.la/")}
         for short,offer in current_by_url.items():
@@ -110,7 +110,8 @@ def pechinchou_diagnostic():
                     **({"candidate_matches":lookup["candidates"]} if lookup["candidates"] else {}),
                     "last_match_status":state,
                     "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
-                },params={"short_url":"eq."+offer["short_url"]})
+                },params={"short_url":"eq."+offer["short_url"],
+                           "last_match_status":"not.like.manus_%"})
                 if lookup["candidates"]:
                     api_candidate_offers+=1
                     suggestions.append({"offer_title":offer.get("title","")[:160],
@@ -198,7 +199,7 @@ def dispatch_manus_queue():
         "select":"short_url,title,source_metadata,status,last_match_status",
         "status":"eq.awaiting_product_identification",
         "order":"short_url.asc","limit":"100"})
-    for offer in [r for r in rows if not str(r.get("last_match_status") or "").startswith("manus_submitted:")][:5]:
+    for offer in [r for r in rows if not str(r.get("last_match_status") or "").startswith("manus_")][:5]:
         try:
             request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
             result=create_manus_task(offer, request_id)
