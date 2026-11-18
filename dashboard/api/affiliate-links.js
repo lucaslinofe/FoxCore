@@ -133,6 +133,23 @@ module.exports=async function(req,res){
    if(!updated.length)return res.status(409).json({ok:false,reason:'review_changed'});
    return res.json({ok:true,status:'listing_verified_pending_approval',listing_id:code,product_url:url.origin+url.pathname,similarity:Math.round(similarity*100),verified:true,affiliate_verified:false});
   }
+  // Operator-controlled handoff to Mercado Livre Linkbuilder; no fabricated affiliate URL.
+  if(action==='linkbuilder_queue'&&req.method==='GET'){
+   const rows=await db('fox_manus_jobs','GET',null,'?status=eq.pending_conversion&select=id,offer_id,product_title,product_url,product_id,affiliate_url&order=created_at.asc&limit=100');
+   const eligible=rows.filter(x=>{try{const u=new URL(x.product_url);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase())&&/MLB\d{7,15}/i.test(u.pathname)}catch{return false}});
+   return res.json({ok:true,jobs:eligible,urls:eligible.map(x=>x.product_url),linkbuilder_url:'https://www.mercadolivre.com.br/afiliados/linkbuilder#hub',automated_conversion:false});
+  }
+  if(action==='manus_to_linkbuilder'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'');
+   if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&status=eq.pending_review&select=id,product_url');
+   if(!jobs.length)return res.status(409).json({ok:false,reason:'job_not_in_review'});
+   let u;try{u=new URL(jobs[0].product_url)}catch{}
+   if(!u||u.protocol!=='https:'||u.username||u.password||u.port||!['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase())||!/MLB\d{7,15}/i.test(u.pathname))return res.status(400).json({ok:false,reason:'invalid_product_url'});
+   const rows=await db('fox_manus_jobs','PATCH',{status:'pending_conversion',updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_review');
+   if(!rows.length)return res.status(409).json({ok:false,reason:'state_changed'});
+   return res.json({ok:true,status:'pending_conversion',product_url:u.origin+u.pathname,affiliate_verified:false});
+  }
   if(action==='manus_approve'&&req.method==='POST'){
    const id=String(req.body?.job_id||'');
    if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
