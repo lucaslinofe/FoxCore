@@ -80,6 +80,9 @@ module.exports=async function(req,res){
   if(action==='manus_approve'&&req.method==='POST'){
    const id=String(req.body?.job_id||'');
    if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const candidates=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&status=eq.pending_review&select=product_url,product_id');
+   if(!candidates.length)return res.status(409).json({ok:false,reason:'job_not_in_review'});
+   if(/\/p\/MLB\d{7,15}/i.test(String(candidates[0].product_url||'')))return res.status(409).json({ok:false,reason:'catalog_requires_individual_listing_verification'});
    const rows=await db('fox_manus_jobs','PATCH',{status:'pending_conversion',updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_review');
    if(!rows.length)return res.status(409).json({ok:false,reason:'job_not_in_review'});
    return res.json({ok:true,job:rows[0]});
