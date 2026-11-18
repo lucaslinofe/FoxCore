@@ -17,6 +17,17 @@ module.exports=async function(req,res){
    const rows=await db('fox_manus_jobs','POST',{offer_id,storefront_url:u.href,status:'pending_manus'},'?on_conflict=offer_id,storefront_url');
    return res.status(201).json({ok:true,job:rows[0]});
   }
+  if(action==='manus_retry'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'');
+   if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
+   const rows=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&select=id,status,manus_task_id,manus_error,product_url');
+   if(rows.length!==1)return res.status(404).json({ok:false,reason:'job_not_found'});
+   const job=rows[0];
+   if(job.status!=='pending_manus'||!job.manus_task_id||!job.manus_error||job.product_url)return res.status(409).json({ok:false,reason:'retry_not_allowed'});
+   const updated=await db('fox_manus_jobs','PATCH',{manus_task_id:null,manus_task_url:null,manus_error:null,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_manus&manus_task_id=eq.'+encodeURIComponent(job.manus_task_id));
+   if(!updated.length)return res.status(409).json({ok:false,reason:'retry_conflict'});
+   return res.json({ok:true,status:'ready_to_dispatch',credits_consumed:false});
+  }
   if(action==='manus_dispatch'&&req.method==='POST'){
    const id=String(req.body?.job_id||'').trim();
    if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(id))return res.status(400).json({ok:false,reason:'invalid_job_id'});
