@@ -10,6 +10,7 @@ from multi_attribute_matcher import compare
 from mercadolivre_search import search_candidates
 from offer_attributes import extract
 from manus_api_v2 import create_manus_task
+from manus_results import check_task
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -158,6 +159,33 @@ def pechinchou_diagnostic():
             "finished_at":datetime.now(timezone.utc).isoformat(),
             "details":{"reason":type(exc).__name__,"diagnostic_only":True}})
 
+def reconcile_manus_queue():
+    """Poll known Manus tasks and persist only validated product destinations."""
+    if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
+        return
+    rows=db("fox_pechinchou_queue",params={
+        "select":"short_url,last_match_status,status",
+        "status":"eq.awaiting_product_identification","limit":"500"})
+    pending=[r for r in rows if str(r.get("last_match_status") or "").startswith("manus_submitted:")][:10]
+    for offer in pending:
+        task_id=offer["last_match_status"].split(":",1)[1]
+        request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
+        try:
+            result=check_task(task_id,request_id)
+            status=result["status"]
+            if status=="pending": continue
+            update={"last_match_status":"manus_"+status,
+                    "last_match_attempt_at":datetime.now(timezone.utc).isoformat()}
+            if status=="resolved":
+                update.update({"product_url":result["product_url"],
+                               "product_code":result["catalog_id"] or result["listing_id"],
+                               "status":"product_identified"})
+            db("fox_pechinchou_queue","PATCH",update,params={
+                "short_url":"eq."+offer["short_url"],
+                "last_match_status":"eq."+offer["last_match_status"]})
+        except Exception as exc:
+            logging.warning("Manus reconciliation failed: %s",type(exc).__name__)
+
 def dispatch_manus_queue():
     """Dispatch a bounded batch only when both authorization and adapter are enabled."""
     if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
@@ -185,6 +213,7 @@ def dispatch_manus_queue():
             # Leave pending for controlled retry; no product is published.
 
 def cycle():
+    reconcile_manus_queue()
     dispatch_manus_queue()
     s=settings()
     sources=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true"})
