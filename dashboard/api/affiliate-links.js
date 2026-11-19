@@ -140,6 +140,11 @@ module.exports=async function(req,res){
    let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_affiliate_url'})}
    if(u.protocol!=='https:'||u.username||u.password||u.port||!['meli.la','www.meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase()))return res.status(400).json({ok:false,reason:'invalid_affiliate_domain'});
    const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&status=eq.pending_conversion&select=id,product_url');
+   const original=String(jobs[0]?.product_url||'');
+   let product;try{product=new URL(original)}catch{}
+   if(product&&u.origin===product.origin&&u.pathname.replace(/\\/$/,'')===product.pathname.replace(/\\/$/,'')&&u.search===product.search)return res.status(400).json({ok:false,reason:'affiliate_url_matches_product_url'});
+   if(u.hostname.toLowerCase()==='meli.la'&&u.pathname.replace(/\\/$/,'')===new URL(String((await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&select=offer_id'))[0]?.offer_id||'https://meli.la/invalid')).pathname.replace(/\\/$/,''))return res.status(400).json({ok:false,reason:'affiliate_url_matches_source_offer'});
+
    if(jobs.length!==1)return res.status(409).json({ok:false,reason:'job_not_pending_conversion'});
    const rows=await db('fox_manus_jobs','PATCH',{affiliate_url:u.href,affiliate_verified:false,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_conversion');
    return res.json({ok:true,status:'pending_conversion',affiliate_url:rows[0]?.affiliate_url||u.href,affiliate_verified:false,publication_enabled:false,verification:'pending_official_confirmation'});
