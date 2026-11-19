@@ -134,6 +134,16 @@ module.exports=async function(req,res){
    return res.json({ok:true,status:'listing_verified_pending_approval',listing_id:code,product_url:url.origin+url.pathname,similarity:Math.round(similarity*100),verified:true,affiliate_verified:false});
   }
   // Operator-controlled handoff to Mercado Livre Linkbuilder; no fabricated affiliate URL.
+  if(action==='linkbuilder_register'&&req.method==='POST'){
+   const id=String(req.body?.job_id||'').trim(),raw=String(req.body?.affiliate_url||'').trim();
+   if(!/^[0-9a-f-]{36}$/i.test(id)||raw.length>2048)return res.status(400).json({ok:false,reason:'invalid_registration'});
+   let u;try{u=new URL(raw)}catch{return res.status(400).json({ok:false,reason:'invalid_affiliate_url'})}
+   if(u.protocol!=='https:'||u.username||u.password||u.port||!['meli.la','www.meli.la','mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase()))return res.status(400).json({ok:false,reason:'invalid_affiliate_domain'});
+   const jobs=await db('fox_manus_jobs','GET',null,'?id=eq.'+id+'&status=eq.pending_conversion&select=id,product_url');
+   if(jobs.length!==1)return res.status(409).json({ok:false,reason:'job_not_pending_conversion'});
+   const rows=await db('fox_manus_jobs','PATCH',{affiliate_url:u.href,affiliate_verified:false,updated_at:new Date().toISOString()},'?id=eq.'+id+'&status=eq.pending_conversion');
+   return res.json({ok:true,status:'pending_conversion',affiliate_url:rows[0]?.affiliate_url||u.href,affiliate_verified:false,publication_enabled:false,verification:'pending_official_confirmation'});
+  }
   if(action==='linkbuilder_queue'&&req.method==='GET'){
    const rows=await db('fox_manus_jobs','GET',null,'?status=eq.pending_conversion&select=id,offer_id,product_title,product_url,product_id,affiliate_url&order=created_at.asc&limit=100');
    const eligible=rows.filter(x=>{try{const u=new URL(x.product_url);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&['mercadolivre.com.br','www.mercadolivre.com.br','produto.mercadolivre.com.br'].includes(u.hostname.toLowerCase())&&/MLB\d{7,15}/i.test(u.pathname)}catch{return false}});
