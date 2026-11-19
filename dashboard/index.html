@@ -79,6 +79,10 @@ const refresh=async()=>{try{
    const copyOne=node('button','Copiar URL deste produto',actions,'secondary');
    copyOne.onclick=async()=>{try{await navigator.clipboard.writeText(j.product_url);note.textContent='URL do produto copiada. Cole no Linkbuilder oficial; o link de afiliado ainda não foi gerado.'}catch(e){note.textContent='Falha ao copiar: '+e.message}};
    const builderOne=node('a','Abrir Linkbuilder',actions,'manus-link');builderOne.href='https://www.mercadolivre.com.br/afiliados/linkbuilder#hub';builderOne.target='_blank';builderOne.rel='noopener noreferrer';
+   const pasted=node('input','',card);pasted.type='url';pasted.placeholder='Cole aqui o link gerado no Linkbuilder';pasted.value=j.affiliate_url||'';pasted.style.width='100%';
+   const saveLink=node('button','Registrar link gerado',actions,'secondary');
+   saveLink.onclick=async()=>{saveLink.disabled=true;try{const response=await fetch('/api/affiliate-links?action=linkbuilder_register',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({job_id:j.id,affiliate_url:pasted.value.trim()})});const data=await response.json();if(!response.ok||!data.ok)throw Error(data.reason||'Registro falhou');note.textContent='Link registrado para conferência. Atribuição de afiliado não verificada; publicação permanece desativada.';await refresh()}catch(e){note.textContent='Erro: '+e.message}finally{saveLink.disabled=false}};
+   if(j.affiliate_url)node('p','Link recebido e armazenado. Atribuição de afiliado ainda não confirmada.',card,'muted');
    if(isCatalog)node('p','A URL é de catálogo. O anúncio individual indicado pelo Manus não foi verificado; confirme o destino no Linkbuilder antes de usar.',card,'muted');
   }
   
