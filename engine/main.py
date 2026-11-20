@@ -9,6 +9,8 @@ from pechinchou_collect_probe import collect
 from multi_attribute_matcher import compare
 from mercadolivre_search import search_candidates
 from offer_attributes import extract
+from manus_api_v2 import create_manus_task
+from manus_results import check_task
 
 logging.basicConfig(level=logging.INFO)
 BASE="https://bzfhxoxquggkijwreivu.supabase.co"
@@ -42,7 +44,7 @@ def pechinchou_diagnostic():
         direct_evidence=0
         # Include historical queue entries, not just the current Pechinchou page.
         existing_rows=db("fox_pechinchou_queue",params={
-            "select":"short_url,title,extracted_attributes,candidate_matches,source_metadata","limit":"1000"})
+            "select":"short_url,title,extracted_attributes,candidate_matches,source_metadata,last_match_status","limit":"1000"})
         existing_by_url={row["short_url"]:row for row in existing_rows}
         current_by_url={o["short_url"]:o for o in offers if o.get("short_url","").startswith("https://meli.la/")}
         for short,offer in current_by_url.items():
@@ -108,7 +110,8 @@ def pechinchou_diagnostic():
                     **({"candidate_matches":lookup["candidates"]} if lookup["candidates"] else {}),
                     "last_match_status":state,
                     "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
-                },params={"short_url":"eq."+offer["short_url"]})
+                },params={"short_url":"eq."+offer["short_url"],
+                           "last_match_status":"not.like.manus_%"})
                 if lookup["candidates"]:
                     api_candidate_offers+=1
                     suggestions.append({"offer_title":offer.get("title","")[:160],
@@ -157,7 +160,65 @@ def pechinchou_diagnostic():
             "finished_at":datetime.now(timezone.utc).isoformat(),
             "details":{"reason":type(exc).__name__,"diagnostic_only":True}})
 
+def reconcile_manus_queue():
+    """Poll known Manus tasks and persist only validated product destinations."""
+    if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
+        return
+    authorized=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true","limit":"100"})
+    if not any("pechinchou" in str(x.get("name") or "").lower() for x in authorized):
+        return
+    rows=db("fox_pechinchou_queue",params={
+        "select":"short_url,last_match_status,status",
+        "status":"eq.awaiting_product_identification","limit":"500"})
+    pending=[r for r in rows if str(r.get("last_match_status") or "").startswith("manus_submitted:")][:10]
+    for offer in pending:
+        task_id=offer["last_match_status"].split(":",1)[1]
+        request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
+        try:
+            result=check_task(task_id,request_id)
+            status=result["status"]
+            if status=="pending": continue
+            update={"last_match_status":"manus_"+status,
+                    "last_match_attempt_at":datetime.now(timezone.utc).isoformat()}
+            if status=="resolved":
+                update.update({"product_url":result["product_url"],
+                               "product_code":result["catalog_id"] or result["listing_id"],
+                               "status":"product_identified"})
+            db("fox_pechinchou_queue","PATCH",update,params={
+                "short_url":"eq."+offer["short_url"],
+                "last_match_status":"eq."+offer["last_match_status"]})
+        except Exception as exc:
+            logging.warning("Manus reconciliation failed: %s",type(exc).__name__)
+
+def dispatch_manus_queue():
+    """Dispatch a bounded batch only when both authorization and adapter are enabled."""
+    if os.getenv("FOX_MANUS_ENABLED", "").lower() != "true":
+        return
+    authorized=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true","limit":"100"})
+    if not any("pechinchou" in str(x.get("name") or "").lower() for x in authorized):
+        logging.info("Manus queue disabled: Pechinchou authorization not recorded")
+        return
+    rows=db("fox_pechinchou_queue",params={
+        "select":"short_url,title,source_metadata,status,last_match_status",
+        "status":"eq.awaiting_product_identification",
+        "order":"short_url.asc","limit":"100"})
+    for offer in [r for r in rows if not str(r.get("last_match_status") or "").startswith("manus_")][:5]:
+        try:
+            request_id=hashlib.sha256(offer["short_url"].encode()).hexdigest()[:32]
+            result=create_manus_task(offer, request_id)
+            state=result["status"]
+            db("fox_pechinchou_queue","PATCH",{
+                "last_match_status":("manus_submitted:"+result["task_id"] if state=="accepted" else "manus_"+state),
+                "last_match_attempt_at":datetime.now(timezone.utc).isoformat()
+            },params={"short_url":"eq."+offer["short_url"],
+                       "status":"eq.awaiting_product_identification"})
+        except Exception as exc:
+            logging.warning("Manus dispatch failed: %s",type(exc).__name__)
+            # Leave pending for controlled retry; no product is published.
+
 def cycle():
+    reconcile_manus_queue()
+    dispatch_manus_queue()
     s=settings()
     sources=db("fox_sources",params={"enabled":"eq.true","authorized":"eq.true"})
     # External connectors require independently verified provider credentials.
